@@ -46,11 +46,15 @@
       })
     }
 
+    // label 为兜底文案；labelKind/labelIndex 由渲染层按当前语言生成标题
+    const single = hits.length === 1 ? hits[0] : null
     return {
       outWidth: Math.max(1, Math.round(gw)),
       outHeight: Math.max(1, Math.round(gh)),
       blocks,
-      label: hits.length === 1 ? hits[0].label : '跨屏选区'
+      label: single ? single.label : '',
+      labelKind: single ? (single.labelKind || 'display') : 'cross',
+      labelIndex: single ? (single.labelIndex || 0) : 0
     }
   }
 

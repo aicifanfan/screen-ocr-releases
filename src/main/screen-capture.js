@@ -96,11 +96,14 @@ async function captureAllScreens() {
       pxHeight: Math.round(bounds.height * sf),  // 物理像素
       id: String(d.id),
       isPrimary: d.id === primary.id,
-      label: d.id === primary.id ? '主屏' : `副屏 ${out.filter((o) => !o.isPrimary).length + 1}`
+      // label 仅用于日志/兜底（不含界面文案）；界面标题由渲染层按语言生成
+      labelKind: d.id === primary.id ? 'primary' : 'secondary',
+      labelIndex: d.id === primary.id ? 0 : out.filter((o) => !o.isPrimary).length + 1,
+      label: d.id === primary.id ? 'Primary' : 'Display ' + (out.filter((o) => !o.isPrimary).length + 1)
     })
   }
 
-  if (!out.length) throw new Error('未捕获到任何显示器')
+  if (!out.length) throw new Error('E_NO_DISPLAY')
 
   // 物理包围盒
   const pMinX = Math.min(...out.map((d) => d.physX))

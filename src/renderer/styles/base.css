@@ -1,0 +1,85 @@
+/* ============================================================
+   基础层 · reset + 全局排版 + 系统偏好
+   ------------------------------------------------------------
+   只放「所有窗口都成立」的规则；任何与具体页面结构相关的
+   选择器都放到 components.css 或各页面的样式文件里。
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  height: 100%;
+  font: 14px/1.7 var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 文本选区：全页统一（含 contentEditable）。
+   必须保持字面 hex —— 测试按 hex 解析 --sel-bg / --sel-text。 */
+::selection {
+  background-color: var(--sel-bg);
+  color: var(--sel-text);
+}
+
+/* 统一的键盘焦点环：鼠标点击不出现，Tab 聚焦才出现 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 滚动条：全局一套，避免每个面板各写一遍 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-md);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: #7c8899;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 拖拽选字期间由 JS 打上；这里只做「全局禁止误选」的兜底 */
+body.is-selecting {
+  cursor: text;
+}
+
+/* 尊重系统「减少动态效果」：动效归零，但保留可见的状态变化 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

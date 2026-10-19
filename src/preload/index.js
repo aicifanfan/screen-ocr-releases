@@ -1,7 +1,31 @@
 // preload：通过 contextBridge 向渲染进程暴露白名单 API
 const { contextBridge, ipcRenderer, webFrame } = require('electron')
 
+// 启动语言：主进程创建窗口时通过 --app-lang=xx 传入（additionalArguments），
+// 不走同步 IPC —— sendSync 在没有监听者时会干扰渲染进程后续的页面导航。
+// 兜底：未传参（如单页测试）时按默认中文。
+function readLanguageArg() {
+  const prefix = '--app-lang='
+  try {
+    const hit = process.argv.find((a) => typeof a === 'string' && a.startsWith(prefix))
+    if (hit) {
+      const v = hit.slice(prefix.length).trim().toLowerCase()
+      if (v === 'zh' || v === 'en') return v
+    }
+  } catch { /* 保持默认 */ }
+  return 'zh'
+}
+const initialLanguage = readLanguageArg()
+
 contextBridge.exposeInMainWorld('api', {
+  // —— 语言（i18n）——
+  // 启动时同步取语言：避免首屏先渲染中文再切成英文（闪一下）
+  initialLanguage,
+  // 切换语言（'auto' | 'zh' | 'en'），主进程持久化并广播给所有窗口
+  setLanguage: (language) => ipcRenderer.invoke('i18n:set', language),
+  // 订阅语言变更 { lang, setting }
+  onLanguageChanged: (cb) => ipcRenderer.on('i18n:changed', (_e, payload) => cb(payload)),
+
   // —— 遮罩选区页 ——
   // 接收主进程发来的各屏截图与虚拟桌面信息 { displays, physVirtual, myIndex }
   onScreens: (cb) => ipcRenderer.on('overlay:screens', (_e, payload) => cb(payload)),

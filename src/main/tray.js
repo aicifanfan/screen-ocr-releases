@@ -3,7 +3,9 @@ const { Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const { get } = require('./config')
 const { acceleratorToDisplay } = require('../renderer/accelerator')
+const I18n = require('../shared/i18n')
 
+// handlers.getLang：由主进程注入，返回当前语言（'zh' | 'en'）
 function createTray(handlers) {
   // 真实托盘图标：16px(1x) + 32px(2x)，高 DPI 下清晰
   const icon16 = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray16.png'))
@@ -15,31 +17,37 @@ function createTray(handlers) {
   }
   const tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
 
+  // 每次取文案时都读当前语言，切换语言后 refresh() 即可生效
+  function t(key, params) {
+    const lang = (handlers.getLang && handlers.getLang()) || I18n.DEFAULT_LANG
+    return I18n.t(lang, key, params)
+  }
+
   function shortcutLabel() {
-    return acceleratorToDisplay(get('shortcut'))
+    return acceleratorToDisplay(get('shortcut')) || t('common.notSet')
   }
 
   function buildMenu() {
     const menu = Menu.buildFromTemplate([
-      { label: '截屏识别（' + shortcutLabel() + '）', click: handlers.onCapture },
+      { label: t('tray.capture', { shortcut: shortcutLabel() }), click: handlers.onCapture },
       { type: 'separator' },
-      { label: '设置…', click: handlers.onSettings },
+      { label: t('tray.settings'), click: handlers.onSettings },
       { type: 'separator' },
-      { label: '退出', click: handlers.onQuit }
+      { label: t('tray.quit'), click: handlers.onQuit }
     ])
     tray.setContextMenu(menu)
   }
 
   function refresh() {
     buildMenu()
-    tray.setToolTip('截屏 OCR — 按 ' + shortcutLabel() + ' 截屏识别文字')
+    tray.setToolTip(t('tray.tooltip', { shortcut: shortcutLabel() }))
   }
 
   refresh()
   // 左键单击托盘也触发截屏
   tray.on('click', handlers.onCapture)
 
-  // 暴露 refresh：快捷键变更后更新菜单与提示
+  // 暴露 refresh：快捷键 / 语言变更后更新菜单与提示
   tray.refresh = refresh
   return tray
 }

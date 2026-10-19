@@ -1,0 +1,396 @@
+/* ============================================================
+   结果页布局
+   ------------------------------------------------------------
+   DOM 契约（测试与交互依赖，不要改）：
+     .main > .screen-group > .screen-body > .text-panel | .img-panel
+     .text-panel > .editor[contenteditable] > .item*
+     .img-panel > .img-wrap > img + .box-layer > .box*
+   ============================================================ */
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------
+   工具栏
+   ------------------------------------------------------------ */
+.toolbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) 10px;
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+
+.toolbar .btn {
+  height: var(--h-control);
+  padding: 0 14px;
+}
+.toolbar .btn-ghost {
+  padding: 0 10px;
+}
+
+.toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--dur);
+}
+.toolbar label:hover {
+  color: var(--text-body);
+}
+/* 操作区与选项区的分隔：伪元素实现，不新增 DOM */
+.toolbar label:first-of-type::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin-right: 2px;
+  background: var(--border);
+}
+.toolbar input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.toolbar input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 状态 / 选中计数：靠右，宽度锁定，避免数字变化推挤右侧按钮 */
+#status {
+  margin-left: auto;
+}
+#status:empty {
+  padding: 0;
+  background: transparent;
+}
+#status:not(:empty) {
+  min-width: 6.5em;
+  animation: status-in 0.18s var(--ease);
+}
+@keyframes status-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 非文本区域不参与划选：避免从文字区往上拖时把屏名、按钮文案选进选区 */
+.toolbar,
+.screen-title,
+.img-panel,
+.empty,
+.empty-hint,
+.img-empty { user-select: none; }
+
+/* ------------------------------------------------------------
+   内容区
+   ------------------------------------------------------------ */
+.main {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.screen-group {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.screen-group:last-child {
+  border-bottom: none;
+}
+
+/* 单屏时让分栏撑满内容区：否则窗口一高，下半屏就是一片空白 */
+.screen-group:only-child {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.screen-group:only-child .screen-body {
+  flex: 1 1 auto;
+}
+.screen-group:only-child .text-panel {
+  max-height: none;
+}
+
+.screen-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.screen-body {
+  display: flex;
+  min-height: 120px;
+}
+
+.text-panel {
+  flex: 1 1 50%;
+  min-width: 0;
+  max-height: 420px;
+  padding: var(--space-3) var(--space-2);
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  /* 滚到底不把滚动传给外层，避免拖选时整页跳动 */
+  overscroll-behavior: contain;
+}
+
+.img-panel {
+  position: relative;
+  flex: 1 1 50%;
+  min-width: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  background: var(--bg-subtle);
+  overscroll-behavior: contain;
+}
+
+.img-wrap {
+  position: relative;
+  display: inline-block;
+  background: #fff;
+  box-shadow: var(--shadow-2);
+}
+.img-wrap img {
+  display: block;
+  max-width: 100%;
+}
+.box-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 无原图时的占位：保持两栏结构，不出现"右边一片空白" */
+.img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 识别框：默认只描边，让原图保持干净；交互时才上淡底 */
+.box {
+  position: absolute;
+  border: 1px solid var(--box-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    border-color var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+.box:hover {
+  border-color: var(--primary);
+  background: var(--box-hover);
+}
+.box.active {
+  z-index: 1;
+  border: 2px solid var(--primary-hover);
+  background: var(--tint-box);
+  box-shadow: 0 0 0 2px var(--primary-ring);
+}
+
+/* ------------------------------------------------------------
+   文字块
+   ------------------------------------------------------------ */
+.item {
+  /* 纵向 padding 必须为 0：多行连续划选时高亮不断裂（测试断言 padding-top=0） */
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  caret-color: var(--primary);
+  /* 状态切换不做过渡：拖选时背景必须即时跟随指针，否则像"高亮追鼠标" */
+}
+
+/* 悬停只做极淡提示 */
+.item:hover {
+  background: var(--tint-hover);
+}
+
+/* 联动指向（点击文字/识别框）：浅蓝底 + 左侧主色条，与「选区」区分开 */
+.item.active {
+  background: var(--tint-link);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+/* 编辑根的焦点反馈由插入符承担：整块描边会像输入框，并与选区、联动抢视觉 */
+.editor {
+  outline: none;
+  min-height: 100%;
+}
+
+/* 单屏内的空状态：比整页空状态更紧凑，避免撑高行 */
+.text-panel .empty {
+  padding: 20px var(--space-2);
+}
+.text-panel .empty-icon {
+  width: 26px;
+  height: 26px;
+}
+
+/* 整页空状态：在内容区里纵向居中，提示行紧跟文案 */
+.empty-state {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+.empty-state .empty {
+  padding-bottom: 4px;
+}
+
+/* ------------------------------------------------------------
+   拖拽态 / 触摸设备
+   ------------------------------------------------------------ */
+/* 拖拽选字期间不再响应悬停：高亮只跟随选区，不跟随指针 */
+body.is-selecting .item:hover:not(.active) {
+  background: transparent;
+}
+body.is-selecting .box:hover:not(.active) {
+  border-color: var(--box-border);
+  background: transparent;
+}
+
+/* 触摸设备没有真正的 hover：去掉会「粘住」的悬停态（不能盖掉 .active） */
+@media (hover: none) {
+  .item:hover:not(.active) {
+    background: transparent;
+  }
+  .box:hover:not(.active) {
+    border-color: var(--box-border);
+    background: transparent;
+  }
+}
+
+/* 触摸 / 触控笔：只调行高与按钮高度，不加上下 padding（否则选区断带） */
+@media (pointer: coarse) {
+  .toolbar .btn {
+    height: var(--h-touch-lg);
+    padding: 0 14px;
+  }
+  .item {
+    line-height: 1.8;
+  }
+}
+
+/* ------------------------------------------------------------
+   窄屏：左右分栏 → 上下堆叠
+   ------------------------------------------------------------ */
+@media (max-width: 760px) {
+  .screen-body {
+    flex-direction: column;
+  }
+  /* 堆叠后按内容高度排列：文字多高就多高，图片紧跟其后，不在中间留空 */
+  .screen-body > .text-panel,
+  .screen-body > .img-panel {
+    flex: 0 0 auto;
+  }
+  .screen-group:only-child .screen-body {
+    flex: 0 0 auto;
+  }
+  .text-panel {
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  /* 图区限高：堆叠后不让图片把文字挤出首屏 */
+  .img-panel {
+    max-height: 42vh;
+  }
+
+  .toolbar {
+    padding: var(--space-2) var(--space-3);
+    gap: 6px var(--space-2);
+  }
+  .toolbar .btn {
+    height: var(--h-touch);
+    padding: 0 var(--space-3);
+  }
+  .toolbar label:first-of-type::before {
+    display: none;
+  }
+  /* 不要占满整行：否则会把右侧「设置」挤到独立的一行 */
+  #status {
+    flex-basis: auto;
+    margin-left: 0;
+  }
+  /* 末尾按钮自己吃掉剩余空间：换行时靠右，而不是孤零零留在左侧 */
+  #btn-settings {
+    margin-left: auto;
+  }
+
+  /* 密集 OCR 文本在窄栏里略松一行，减少串行 */
+  .item {
+    padding: 0 var(--space-3);
+    line-height: 1.75;
+  }
+
+  /* 骨架屏同样堆叠，避免加载完成时布局跳动 */
+  .skeleton {
+    flex-direction: column;
+  }
+  .skeleton-col.is-media {
+    min-height: 140px;
+  }
+}
+
+/* ------------------------------------------------------------
+   高对比度模式：补上不依赖颜色的结构提示
+   ------------------------------------------------------------ */
+@media (forced-colors: active) {
+  .item.active {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  .box {
+    border-color: CanvasText;
+  }
+  .box.active {
+    border-color: Highlight;
+  }
+}

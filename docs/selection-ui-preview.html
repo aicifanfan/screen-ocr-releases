@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCR 文本选择界面 · 改造预览</title>
+<style>
+  :root {
+    --bg: #f4f6fa;
+    --card: #ffffff;
+    --border: #e3e8f0;
+    --border-strong: #cbd5e1;
+    --text: #0f172a;
+    --text-body: #1f2937;
+    --muted: #64748b;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --tint-hover: #f4f7fb;
+    --tint-link: #eff6ff;
+    --sel-bg: #c9dcfd;
+    --sel-text: #0b2b52;
+    --ok: #15803d;
+    --ease: cubic-bezier(.2, .8, .2, 1);
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0; padding: 40px 24px 64px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  /* —— 页头 —— */
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    color: var(--primary); background: var(--tint-link);
+    border: 1px solid #dbe7fe; border-radius: 999px;
+    padding: 2px 10px; margin-bottom: 14px;
+  }
+  h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.35; letter-spacing: -.01em; }
+  .lead { margin: 0; max-width: 760px; color: var(--muted); font-size: 14.5px; }
+  .lead code {
+    font: 12.5px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+    background: #eef2f8; border-radius: 4px; padding: 1px 5px; color: #334155;
+  }
+
+  section { margin-top: 44px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-num {
+    font: 600 12px/1 ui-monospace, Consolas, monospace;
+    color: var(--primary); letter-spacing: .06em;
+  }
+  h2 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+  .sec-desc { margin: 0 0 18px; color: var(--muted); font-size: 13.5px; }
+
+  /* —— 通用卡片 —— */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    background: #fbfcfe; font-size: 12.5px; color: var(--muted);
+  }
+  .tag {
+    display: inline-flex; align-items: center;
+    height: 20px; padding: 0 7px; border-radius: 5px;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
+  }
+  .tag.bad  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .tag.good { background: #f0fdf4; color: var(--ok);  border: 1px solid #bbf7d0; }
+
+  /* —— 01 A/B 对比 —— */
+  .ab { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel {
+    padding: 10px 8px; min-height: 116px;
+    font-size: 14px; line-height: 1.7; color: var(--text-body);
+  }
+  .item {
+    padding: 0 8px; white-space: pre-wrap;
+    overflow-wrap: anywhere; cursor: text; outline: none;
+  }
+  .editor { outline: none; }
+  ::selection { background: var(--sel-bg); color: var(--sel-text); }
+
+  .readout {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; border-top: 1px solid var(--border);
+    background: #fbfcfe; font-size: 12.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .readout b { color: var(--text); font-weight: 600; }
+  .readout .verdict {
+    margin-left: auto; font-weight: 600;
+    color: var(--muted);
+  }
+  .card.hit .readout .verdict { color: var(--primary); }
+  .card.miss .readout .verdict { color: #b91c1c; }
+
+  .hintbar {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 14px; padding: 9px 12px;
+    background: #fff; border: 1px dashed var(--border-strong);
+    border-radius: 9px; color: var(--muted); font-size: 13px;
+  }
+  .hintbar strong { color: var(--text-body); font-weight: 600; }
+
+  /* —— 02 状态阶梯 —— */
+  .ladder { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .step {
+    display: flex; flex-direction: column;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px;
+  }
+  .step h3 {
+    margin: 0 0 2px; font-size: 12.5px; font-weight: 600;
+  }
+  .step p { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .demo {
+    padding: 6px 0; border-radius: 6px; min-height: 62px;
+    font-size: 12.5px; line-height: 1.75; color: var(--text-body);
+    border: 1px solid transparent;
+  }
+  .demo .row { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .demo.s-hover { background: var(--tint-hover); }
+  .demo.s-link  { background: var(--tint-link); box-shadow: inset 2px 0 0 var(--primary); }
+  .demo.s-sel .sel { background: var(--sel-bg); color: var(--sel-text); }
+  .demo.s-drag { background: #fff; }
+  /* 拖拽中的光标：只画插入符，不画 hover 底 */
+  .demo.s-drag .row:first-child::after {
+    content: ""; display: inline-block;
+    width: 1.5px; height: 1.05em; margin-left: 1px;
+    background: var(--primary); vertical-align: -2px;
+  }
+  .spec {
+    margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border);
+    font: 11px/1.5 ui-monospace, Consolas, monospace; color: #7c8899;
+  }
+
+  /* —— 03 令牌 —— */
+  .tokens { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .token {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 13px;
+  }
+  .swatch {
+    width: 38px; height: 38px; border-radius: 8px; flex: 0 0 auto;
+    border: 1px solid rgba(15, 23, 42, .10);
+  }
+  .token dl { margin: 0; }
+  .token dt { font-size: 12.5px; font-weight: 600; }
+  .token dd {
+    margin: 1px 0 0; font: 11px/1.5 ui-monospace, Consolas, monospace; color: var(--muted);
+  }
+  .token dd .ok { color: var(--ok); }
+  .token dd .bad { color: #b91c1c; }
+
+  /* —— 04 窄屏 —— */
+  .narrow-row { display: flex; align-items: flex-start; gap: 24px; }
+  .phone {
+    width: 390px; flex: 0 0 auto; padding: 10px;
+    background: #0f172a; border-radius: 22px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, .22);
+  }
+  .phone-inner {
+    background: #fff; border-radius: 14px; overflow: hidden;
+  }
+  .mini-toolbar {
+    display: flex; flex-wrap: wrap; gap: 6px 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .mini-btn {
+    display: inline-flex; align-items: center; height: 40px; padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    font-size: 13px; color: var(--text-body); background: #fff;
+  }
+  .mini-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .mini-status {
+    margin-left: auto; align-self: center; font-size: 12px; color: var(--primary);
+    background: var(--tint-link); border-radius: 999px; padding: 2px 10px;
+  }
+  .mini-panel { padding: 10px 12px; font-size: 15px; line-height: 1.75; color: var(--text-body); }
+  .mini-panel .row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-panel .row.sel { background: var(--sel-bg); color: var(--sel-text); }
+  .narrow-notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+  .narrow-notes li { margin-bottom: 8px; }
+  .narrow-notes strong { color: var(--text-body); font-weight: 600; }
+
+  footer {
+    margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--border);
+    color: #8a97a8; font-size: 12.5px;
+  }
+
+  @media (max-width: 900px) {
+    .ab { grid-template-columns: 1fr; }
+    .ladder { grid-template-columns: repeat(2, 1fr); }
+    .tokens { grid-template-columns: 1fr; }
+    .narrow-row { flex-direction: column; }
+    .phone { width: 100%; max-width: 390px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">结果页 · 选区体验</div>
+  <h1>OCR 文本选择界面改造预览</h1>
+  <p class="lead">
+    左边是当前实现：每行 OCR 文本各自是一个 <code>contentEditable</code>。右边改成单一编辑容器、行作为块级子节点。
+    两边的视觉样式完全一致，<strong>差异只在结构</strong>——你可以直接拖动文字，对比下方读数。
+  </p>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>跨行拖选：结构决定结果</h2></div>
+    <p class="sec-desc">用鼠标从第 1 行按住，拖到第 3 行再松开。看「命中行数」。</p>
+
+    <div class="hintbar">
+      <strong>怎么试：</strong>从任意一行文字中间按下，拖过三行再松手；或在同一行内左右拖选即可看到选区色。
+    </div>
+
+    <div class="ab">
+      <div class="card" data-ab="multi">
+        <div class="card-head"><span class="tag bad">现状</span>3 个独立 contentEditable</div>
+        <div class="panel">
+          <div class="item" contenteditable="true">订单编号 A-2024-001 已发货</div>
+          <div class="item" contenteditable="true">收件人：张伟　联系电话 138****6621</div>
+          <div class="item" contenteditable="true">地址：杭州市余杭区文一西路 969 号</div>
+        </div>
+        <div class="readout">
+          已选 <b class="n">0</b> 字 · 命中 <b class="h">0</b>/3 行
+          <span class="verdict">选区被截断在第 1 行</span>
+        </div>
+      </div>
+
+      <div class="card" data-ab="single">
+        <div class="card-head"><span class="tag good">改造后</span>1 个编辑根 + 3 个行节点</div>
+        <div class="panel">
+          <div class="editor" contenteditable="true" spellcheck="false">
+            <div class="item">订单编号 A-2024-001 已发货</div>
+            <div class="item">收件人：张伟　联系电话 138****6621</div>
+            <div class="item">地址：杭州市余杭区文一西路 969 号</div>
+          </div>
+        </div>
+        <div class="readout">
+          已选 <b class="n">0</b> 字 · 命中 <b class="h">0</b>/3 行
+          <span class="verdict">跨 3 行连续选中</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>状态阶梯：只有选区是实色</h2></div>
+    <p class="sec-desc">联动指向和识别框都退到「描边 / 色条 / 淡底」，确保用户一眼分清「系统指的」和「我选的」。</p>
+
+    <div class="ladder">
+      <div class="step">
+        <h3>未选中</h3>
+        <p>正文 14.68:1</p>
+        <div class="demo"><div class="row">识别文字 ABC 123</div></div>
+        <div class="spec">bg: transparent</div>
+      </div>
+      <div class="step">
+        <h3>悬停</h3>
+        <p>仅指针设备</p>
+        <div class="demo s-hover"><div class="row">识别文字 ABC 123</div></div>
+        <div class="spec">bg: #f4f7fb</div>
+      </div>
+      <div class="step">
+        <h3>联动指向</h3>
+        <p>点击识别框时</p>
+        <div class="demo s-link"><div class="row">识别文字 ABC 123</div></div>
+        <div class="spec">bg: #eff6ff<br>inset 2px 主色条</div>
+      </div>
+      <div class="step">
+        <h3>拖拽中</h3>
+        <p>hover 被抑制</p>
+        <div class="demo s-drag">
+          <div class="row">识别文字 ABC 123</div>
+          <div class="row">识别文字 DEF 456</div>
+        </div>
+        <div class="spec">body.is-selecting<br>hover: transparent</div>
+      </div>
+      <div class="step">
+        <h3>文本选中</h3>
+        <p>10.22:1（AAA）</p>
+        <div class="demo s-sel">
+          <div class="row">识别文字 <span class="sel">ABC 123</span></div>
+        </div>
+        <div class="spec">bg: #c9dcfd<br>color: #0b2b52</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>令牌与对比度</h2></div>
+    <p class="sec-desc">对比度按 WCAG 2.x 相对亮度公式实算。唯一需要修的是空状态文字。</p>
+
+    <div class="tokens">
+      <div class="token">
+        <div class="swatch" style="background:#c9dcfd"></div>
+        <dl><dt>文本选区底</dt><dd>#c9dcfd · <span class="ok">10.22:1 配 #0b2b52</span></dd></dl>
+      </div>
+      <div class="token">
+        <div class="swatch" style="background:#eff6ff"></div>
+        <dl><dt>联动指向底</dt><dd>#eff6ff · 靠 2px 色条承载</dd></dl>
+      </div>
+      <div class="token">
+        <div class="swatch" style="background:#f4f7fb"></div>
+        <dl><dt>悬停底</dt><dd>#f4f7fb · 仅 (hover:hover)</dd></dl>
+      </div>
+      <div class="token">
+        <div class="swatch" style="background:#94a3b8"></div>
+        <dl><dt>空状态（现状）</dt><dd>#94a3b8 · <span class="bad">2.56:1 不合格</span></dd></dl>
+      </div>
+      <div class="token">
+        <div class="swatch" style="background:#64748b"></div>
+        <dl><dt>空状态（建议）</dt><dd>#64748b · <span class="ok">4.76:1 合格</span></dd></dl>
+      </div>
+      <div class="token">
+        <div class="swatch" style="background:#15803d"></div>
+        <dl><dt>成功态文字</dt><dd>#15803d on #ecfdf5 · <span class="ok">4.76:1</span></dd></dl>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>窄屏 390px</h2></div>
+    <p class="sec-desc">分栏改堆叠，图区限高 42vh，正文升到 15px / 1.75，按钮升到 40px。</p>
+
+    <div class="narrow-row">
+      <div class="phone">
+        <div class="phone-inner">
+          <div class="mini-toolbar">
+            <span class="mini-btn primary">复制全文</span>
+            <span class="mini-btn">复制选中</span>
+            <span class="mini-status">已选 12 字</span>
+          </div>
+          <div class="mini-panel">
+            <div class="row">订单编号 A-2024-001 已发货</div>
+            <div class="row"><span class="sel">收件人：张伟</span>　联系电话 138****6621</div>
+            <div class="row">地址：杭州市余杭区文一西路 969 号</div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="narrow-notes">
+        <li><strong>触摸目标 40px</strong>：工具栏按钮在 <code>pointer: coarse</code> 下加高，拇指可点。</li>
+        <li><strong>不新增纵向 margin</strong>：行距用 <code>line-height</code> 调整，跨行选区才不会出现白色断带。</li>
+        <li><strong>图区限高</strong>：堆叠后若图占满屏，文字被挤出首屏，联动就失去意义。</li>
+        <li><strong>不自绘手柄</strong>：触屏 Windows 由 Chromium 绘制原生手柄，自绘会丢系统复制与输入法。</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    静态样式复刻，用于确认视觉层级与结构差异；阴影、动效、滚动条细节以实际 Electron 窗口为准。
+  </footer>
+</div>
+
+<script>
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card[data-ab]'))
+
+  function refresh() {
+    var sel = window.getSelection()
+    cards.forEach(function (card) {
+      var lines = card.querySelectorAll('.item')
+      var n = 0
+      var hits = 0
+      var inside = sel && sel.anchorNode && card.contains(sel.anchorNode)
+
+      if (inside && sel.rangeCount && !sel.isCollapsed) {
+        var range = sel.getRangeAt(0)
+        n = sel.toString().replace(/\s/g, '').length
+        Array.prototype.forEach.call(lines, function (line) {
+          if (range.intersectsNode(line)) hits++
+        })
+      }
+
+      card.querySelector('.n').textContent = n
+      card.querySelector('.h').textContent = hits
+
+      var ok = n === 0 || hits >= 2
+      card.classList.toggle('hit', n > 0 && ok)
+      card.classList.toggle('miss', n > 0 && !ok)
+    })
+  }
+
+  // selectionchange 很密集，合并到一帧只算一次
+  var raf = 0
+  document.addEventListener('selectionchange', function () {
+    if (raf) return
+    raf = requestAnimationFrame(function () { raf = 0; refresh() })
+  })
+})()
+</script>
+</body>
+</html>

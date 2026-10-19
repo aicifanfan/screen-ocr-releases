@@ -2,276 +2,150 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>设置 — 截屏 OCR</title>
-<style>
-  :root {
-    --bg: #f4f6fb;
-    --card: #ffffff;
-    --border: #e6e9f0;
-    --text: #1f2937;
-    --text-2: #6b7280;
-    --text-3: #9ca3af;
-    --primary: #2563eb;
-    --primary-hover: #1d4ed8;
-    --primary-soft: #eef4ff;
-    --danger: #ef4444;
-    --radius: 14px;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-    background: var(--bg); color: var(--text);
-    -webkit-user-select: none; user-select: none;
-    overflow: hidden;
-  }
-
-  /* 顶部标题区 */
-  .header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 18px 22px 14px;
-    background: linear-gradient(135deg, #2563eb, #4f46e5);
-    color: #fff;
-  }
-  .header .logo {
-    width: 40px; height: 40px; border-radius: 10px;
-    background: rgba(255,255,255,0.18);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 20px; backdrop-filter: blur(4px);
-  }
-  .header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .3px; }
-  .header p { margin: 2px 0 0; font-size: 12px; opacity: .82; }
-  .header .header-title { flex: 1; min-width: 0; }
-
-  /* 缩放控件 */
-  .zoom-ctrl {
-    display: flex; align-items: center; gap: 2px;
-    background: rgba(255,255,255,0.14); border-radius: 10px; padding: 3px;
-    flex: 0 0 auto;
-  }
-  .zoom-btn {
-    border: none; background: transparent; color: #fff;
-    width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
-    font-size: 17px; line-height: 1; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    transition: background .12s;
-  }
-  .zoom-btn:hover { background: rgba(255,255,255,0.22); }
-  .zoom-btn:active { background: rgba(255,255,255,0.34); }
-  .zoom-val {
-    min-width: 42px; text-align: center; font-size: 12px; font-weight: 600;
-    color: #fff; opacity: .95; user-select: none;
-  }
-  .zoom-btn.zoom-reset { width: auto; padding: 0 10px; font-size: 12px; }
-
-  /* 滚动区 */
-  .scroll { height: calc(100% - 72px - 64px); overflow-y: auto; padding: 16px 22px; }
-
-  /* 分组卡片 */
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px;
-    box-shadow: 0 1px 3px rgba(16,24,40,.06);
-  }
-  .card-title {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 12px; font-weight: 600; color: var(--text-3);
-    text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px;
-  }
-  .card-title::after { content:''; flex:1; height:1px; background: var(--border); }
-
-  /* 行 */
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 0; }
-  .row + .row { border-top: 1px solid #f1f3f8; margin-top: 2px; padding-top: 14px; }
-  .row .label { font-size: 14px; }
-  .row .desc { font-size: 12px; color: var(--text-2); margin-top: 1px; }
-
-  /* 快捷键录制框 */
-  .hotkey-box {
-    display: inline-flex; align-items: center; gap: 8px;
-    min-width: 180px; padding: 9px 14px;
-    border: 1.5px solid var(--border); border-radius: 9px;
-    background: #fafbfd; cursor: pointer;
-    font-size: 14px; color: var(--text); transition: border-color .15s, box-shadow .15s, background .15s;
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-weight: 600;
-  }
-  .hotkey-box:hover { border-color: #cbd5e1; }
-  .hotkey-box.recording {
-    border-color: var(--primary); background: var(--primary-soft);
-    box-shadow: 0 0 0 3px rgba(37,99,235,.12); color: var(--primary);
-  }
-  .hotkey-box .kbd { color: var(--text-3); font-weight: 400; font-family: inherit; }
-  .hotkey-reset {
-    border: none; background: transparent; color: var(--text-3);
-    font-size: 12px; cursor: pointer; padding: 4px 6px; border-radius: 6px;
-  }
-  .hotkey-reset:hover { color: var(--danger); background: #fef2f2; }
-
-  /* 下拉选择（识别精度） */
-  .sel {
-    flex: 0 0 auto; min-width: 104px;
-    padding: 6px 10px; border-radius: 8px;
-    border: 1px solid var(--border, #e5e7eb);
-    background: #fff; color: var(--text-1, #111827);
-    font-size: 13px; cursor: pointer; outline: none;
-  }
-  .sel:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
-
-  /* Toggle 开关 */
-  .switch { position: relative; width: 44px; height: 26px; flex: 0 0 auto; }
-  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
-  .switch .track {
-    position: absolute; inset: 0; border-radius: 999px; background: #d1d5db;
-    transition: background .18s; pointer-events: none;
-  }
-  .switch .thumb {
-    position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
-    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25);
-    transition: transform .18s; pointer-events: none;
-  }
-  .switch input:checked + .track { background: var(--primary); }
-  .switch input:checked ~ .thumb { transform: translateX(18px); }
-
-  /* 底部操作条 */
-  .footer {
-    position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
-    display: flex; align-items: center; gap: 10px; padding: 0 22px;
-    background: #fff; border-top: 1px solid var(--border);
-  }
-  .footer .hint { font-size: 12px; color: var(--text-3); margin-right: auto; }
-  .btn {
-    padding: 9px 20px; border-radius: 9px; border: 1px solid var(--border);
-    background: #fff; cursor: pointer; font-size: 14px; font-weight: 500;
-    transition: background .15s, border-color .15s, color .15s, transform .05s;
-  }
-  .btn:hover { background: #f9fafb; }
-  .btn:active { transform: translateY(1px); }
-  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
-  .btn.primary:hover { background: var(--primary-hover); }
-
-  /* 更新状态行 */
-  .update-status {
-    margin-top: 12px; padding: 8px 12px; border-radius: 8px;
-    font-size: 12px; line-height: 1.5; display: none;
-    background: #f8fafc; color: var(--text-2);
-  }
-  .update-status.error { background: #fef2f2; color: var(--danger); }
-  .update-status.ok { background: #f0fdf4; color: #16a34a; }
-  .update-status.info { background: var(--primary-soft); color: var(--primary); }
-  .version-tag {
-    font-family: ui-monospace, Consolas, monospace; font-weight: 600; color: var(--text);
-  }
-</style>
+<title></title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/components.css">
+<link rel="stylesheet" href="styles/settings.css">
 </head>
 <body>
   <div class="header">
     <div class="logo">📷</div>
     <div class="header-title">
-      <h1>截屏 OCR 设置</h1>
-      <p>截图、识别与启动行为</p>
+      <h1 data-i18n="settings.header.title"></h1>
+      <p data-i18n="settings.header.subtitle"></p>
     </div>
     <div class="zoom-ctrl">
-      <button class="zoom-btn" id="zoom-out" title="缩小（Ctrl+-）">−</button>
+      <button class="zoom-btn" id="zoom-out" data-i18n-title="settings.zoom.out">−</button>
       <span class="zoom-val" id="zoom-val">100%</span>
-      <button class="zoom-btn" id="zoom-in" title="放大（Ctrl+=）">＋</button>
-      <button class="zoom-btn zoom-reset" id="zoom-reset" title="重置为 100%（Ctrl+0）">重置</button>
+      <button class="zoom-btn" id="zoom-in" data-i18n-title="settings.zoom.in">＋</button>
+      <button class="zoom-btn zoom-reset" id="zoom-reset" data-i18n="settings.zoom.reset" data-i18n-title="settings.zoom.resetTitle"></button>
     </div>
   </div>
 
   <div class="scroll">
+    <!-- 语言：放在最上面，方便第一时间找到 -->
     <div class="card">
-      <div class="card-title">快捷键</div>
+      <div class="card-title" data-i18n="settings.card.language"></div>
       <div class="row">
-        <div>
-          <div class="label">截图识别快捷键</div>
-          <div class="desc">点击右侧框，然后按下新的组合键</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.language.label"></div>
+          <div class="desc" data-i18n="settings.language.desc"></div>
         </div>
-        <div style="display:flex; align-items:center; gap:6px;">
-          <div class="hotkey-box" id="hotkey-box" tabindex="0" title="点击后按下新组合键">
-            <span id="hotkey-text">Ctrl + Shift + A</span>
+        <div class="ctl">
+          <select class="select" id="opt-language">
+            <option value="auto" data-i18n="settings.language.auto"></option>
+            <option value="zh" data-i18n="settings.language.zh"></option>
+            <option value="en" data-i18n="settings.language.en"></option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" data-i18n="settings.card.hotkey"></div>
+      <div class="row">
+        <div class="meta">
+          <div class="label" data-i18n="settings.hotkey.label"></div>
+          <div class="desc" data-i18n="settings.hotkey.desc"></div>
+        </div>
+        <div class="ctl">
+          <div class="hotkey-box" id="hotkey-box" tabindex="0" role="button" data-i18n-title="settings.hotkey.boxTitle">
+            <span id="hotkey-text"></span>
           </div>
-          <button class="hotkey-reset" id="hotkey-reset" title="恢复默认">重置</button>
+          <button class="btn-link" id="hotkey-reset" data-i18n="settings.hotkey.reset" data-i18n-title="settings.hotkey.resetTitle"></button>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">通用</div>
+      <div class="card-title" data-i18n="settings.card.general"></div>
       <div class="row">
-        <div>
-          <div class="label">识别精度</div>
-          <div class="desc">均衡：速度与准确度兼顾（推荐）；高精度更准但明显更慢；快速适合大段文字</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.ocr.label"></div>
+          <div class="desc" data-i18n="settings.ocr.desc"></div>
         </div>
-        <select class="sel" id="opt-ocr-profile">
-          <option value="fast">快速</option>
-          <option value="balanced">均衡</option>
-          <option value="accurate">高精度</option>
-        </select>
+        <div class="ctl">
+          <select class="select" id="opt-ocr-profile">
+            <option value="fast" data-i18n="settings.ocr.fast"></option>
+            <option value="balanced" data-i18n="settings.ocr.balanced"></option>
+            <option value="accurate" data-i18n="settings.ocr.accurate"></option>
+          </select>
+        </div>
       </div>
       <div class="row">
-        <div>
-          <div class="label">开机自启动</div>
-          <div class="desc">登录 Windows 后自动在后台运行</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.autoLaunch.label"></div>
+          <div class="desc" data-i18n="settings.autoLaunch.desc"></div>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="opt-autolaunch">
-          <span class="track"></span><span class="thumb"></span>
-        </label>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="opt-autolaunch">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
       </div>
       <div class="row">
-        <div>
-          <div class="label">启动时立即截屏</div>
-          <div class="desc">默认关闭。关闭时程序启动后只在托盘待命，由快捷键 / 托盘菜单主动触发截屏</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.captureLaunch.label"></div>
+          <div class="desc" data-i18n="settings.captureLaunch.desc"></div>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="opt-capture-launch">
-          <span class="track"></span><span class="thumb"></span>
-        </label>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="opt-capture-launch">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
       </div>
       <div class="row">
-        <div>
-          <div class="label">复制后自动关闭结果</div>
-          <div class="desc">复制文字后关闭结果窗口，便于直接粘贴</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.autoClose.label"></div>
+          <div class="desc" data-i18n="settings.autoClose.desc"></div>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="opt-auto-close">
-          <span class="track"></span><span class="thumb"></span>
-        </label>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="opt-auto-close">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
       </div>
       <div class="row">
-        <div>
-          <div class="label">GPU 硬件加速（实验性）</div>
-          <div class="desc">关闭时走兼容模式（更稳定，默认开启）；开启后框选拖拽更流畅，但个别显卡驱动可能导致启动失败（崩溃后会自动降级）</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.gpu.label"></div>
+          <div class="desc" data-i18n="settings.gpu.desc"></div>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="opt-gpu">
-          <span class="track"></span><span class="thumb"></span>
-        </label>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="opt-gpu">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">关于与更新</div>
+      <div class="card-title" data-i18n="settings.card.about"></div>
       <div class="row">
-        <div>
-          <div class="label">当前版本</div>
-          <div class="desc">自动检查 GitHub Releases 上的新版本</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.version.label"></div>
+          <div class="desc" data-i18n="settings.version.desc"></div>
         </div>
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div class="ctl">
           <span class="version-tag" id="app-version">v—</span>
-          <button class="btn" id="btn-check-update" style="padding:7px 14px;font-size:13px;">检查更新</button>
+          <button class="btn btn-sm" id="btn-check-update" data-i18n="settings.version.check"></button>
         </div>
       </div>
       <div class="row">
-        <div>
-          <div class="label">启动时自动检查更新</div>
-          <div class="desc">打开应用后在后台静默检查新版本</div>
+        <div class="meta">
+          <div class="label" data-i18n="settings.autoCheck.label"></div>
+          <div class="desc" data-i18n="settings.autoCheck.desc"></div>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="opt-auto-check">
-          <span class="track"></span><span class="thumb"></span>
-        </label>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="opt-auto-check">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
       </div>
       <div class="update-status" id="update-status"></div>
     </div>
@@ -279,10 +153,11 @@
 
   <div class="footer">
     <span class="hint" id="hint"></span>
-    <button class="btn" id="btn-cancel">取消</button>
-    <button class="btn primary" id="btn-save">保存</button>
+    <button class="btn" id="btn-cancel" data-i18n="settings.cancel"></button>
+    <button class="btn btn-primary" id="btn-save" data-i18n="settings.save"></button>
   </div>
 
+  <script src="../shared/i18n.js"></script>
   <script src="accelerator.js"></script>
   <script src="settings.js"></script>
 </body>

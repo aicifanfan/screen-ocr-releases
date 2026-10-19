@@ -36,6 +36,47 @@ npm start
 > 若 `python` 不在默认环境，可用环境变量指定 OCR 服务的解释器：
 > `SCREEN_OCR_PYTHON=/path/to/python npm start`
 
+## 多语言（中文 / English）
+
+界面支持中英双语，切换后**立即生效、无需刷新**，选择会持久化到 `userData/settings.json` 的 `language` 字段。
+
+**切换入口**：托盘右键 →「设置」→ 顶部「语言」卡片（或结果页「⚙ 设置」）。
+
+| 设置值 | 含义 |
+|---|---|
+| `auto`（默认） | 跟随系统语言：`zh-*` → 中文，其余 → English |
+| `zh` | 强制中文 |
+| `en` | 强制英文 |
+
+**回退规则**（保证任何异常情况下界面都有内容）：
+
+1. 配置里的值非法（如手改成 `klingon`）→ 按 `auto` 处理；
+2. `auto` 且系统语言无法识别（如 `fr-FR`）→ 回落中文；
+3. 某个 key 在当前语言缺失 → 回落中文文案；
+4. 中英都缺失 → 直接显示 key 本身（便于发现漏译，不会白屏）。
+
+**代码结构**：
+
+```
+src/shared/i18n.js      # 唯一文案来源：zh/en 词典 + t() + applyDom()（主进程 require、渲染进程 <script> 均可用）
+```
+
+- 主进程：窗口标题、托盘菜单/提示、更新弹窗与错误码都用 `t()`；
+- 渲染进程：静态文案用 `data-i18n` / `data-i18n-title` 标记，动态文案（屏名、置信度、更新状态）用 `t('key', {参数})`；
+- 语言变更由主进程 `i18n:set` 持久化后广播 `i18n:changed`，各窗口就地重绘；
+- 屏名等**运行时数据不存文案**，只传 `labelKind/labelIndex`，由渲染层按当前语言生成。
+
+**新增一门语言**：在 `src/shared/i18n.js` 的 `MESSAGES` 增加一份同 key 词典，并把语言代码加进 `LANGS` / `ALIASES`，改 `normalizeLang` 的映射即可；`test_i18n.js` 会校验 key 与占位符是否对齐。
+
+**防止漏译的三道测试**：
+
+```bash
+node test_i18n.js         # 词典完整性、占位符一致性、语言解析与回退
+node test_i18n_scan.js    # 扫描 src/：硬编码中文残留 + 引用了不存在的 key
+npx electron test_i18n_ui.js    # 真实渲染：切换语言、无中文残留、长文案不撑破布局
+npx electron test_i18n_main.js  # 主进程链路：配置→preload→切换→持久化→广播
+```
+
 ## 常见问题
 
 - **`onnxruntime is not installed`**：`rapidocr` 不自动安装推理引擎，需手动 `pip install onnxruntime`。
@@ -56,15 +97,22 @@ python test_ocr.py
 
 # Electron 系列自检（需 unset ELECTRON_RUN_AS_NODE）
 unset ELECTRON_RUN_AS_NODE
-npx electron test_launch.js      # 模块加载
-npx electron test_capture.js     # 多屏捕获 + 混合 DPI 字段 + 屏标识
-npx electron test_e2e.js         # 多屏截图→裁剪→OCR 全链路
-npx electron test_overlay.js     # 遮罩页混合 DPI 合成 + 单屏/跨屏裁剪（像素级校验）
-npx electron test_overlay_full.js# 完整启动主进程诊断渲染
-npx electron test_result.js      # 结果页多屏分组渲染 + 双向联动 + 兼容
-npx electron test_copy.js        # 复制交互（复制/连续刷新/全选/自动关闭）
-npx electron test_tray.js        # 托盘图标加载
-npx electron test_single.js      # 单实例锁 + 二次启动唤起截屏
+npx electron test_launch.js       # 模块加载
+npx electron test_capture.js      # 多屏捕获 + 混合 DPI 字段 + 屏标识
+npx electron test_capture_jpeg.js # JPEG 捕获 → 解码 → 像素有效 + 前后基准对比
+npx electron test_e2e.js          # 多屏截图→裁剪→OCR 全链路
+npx electron test_overlay.js      # 遮罩混合 DPI 合成 + 单屏/跨屏裁剪（像素级校验）
+npx electron test_clipmask.js     # clip-path 单遮罩挖洞
+npx electron test_overlay_full.js # 完整启动诊断：每块屏是否都被遮罩覆盖
+npx electron test_overlay_fresh.js# 每次截屏都是全新窗口（无嵌套/叠加）
+npx electron test_result.js       # 结果页多屏分组渲染 + 双向联动
+npx electron test_copy.js         # 复制交互（复制/连续刷新/全选/自动关闭）
+npx electron test_settings.js     # 设置页（快捷键录制/缩放/更新/语言入口）
+npx electron test_single.js       # 单实例锁 + 二次启动唤起截屏
+npx electron test_tray.js         # 托盘图标加载
+npx electron test_ocr_bridge.js   # Node → 打包 exe 的 OCR 协议链路
+npx electron test_i18n_ui.js      # 中英切换（无刷新、无残留、布局不溢出）
+npx electron test_i18n_main.js    # 语言持久化与广播链路
 ```
 
 > **受限/无 GPU 环境（如 CI、WorkBuddy 沙箱）**：运行窗口渲染类自检（`test_overlay.js`）时加 `--no-sandbox --disable-gpu`，例如：
@@ -128,3 +176,41 @@ npm run dist
 1. **onnxruntime 版本必须 ≤ 1.20.1**：新版（如 1.31.0）与 PyInstaller 打包后会触发 `0xC0000005`（ACCESS_VIOLATION）崩溃。`npm run build-py` 前先 `pip install onnxruntime==1.20.1`。
 2. **中文乱码**：PyInstaller 打包后 `sys.stdout` 默认 GBK 编码，直接输出中文会被 Electron 侧 UTF-8 解码成乱码。已在 `ocr_server.py` 的 `_emit()` 中用 `ensure_ascii=True`（输出 `\uXXXX`）+ `sys.stdout.reconfigure(encoding='utf-8')` 双保险解决，勿改回 `ensure_ascii=False`。
 3. **收集依赖**：`build-py` 脚本用 `--collect-all rapidocr --collect-all onnxruntime` 收集模型文件与 onnxruntime 原生 DLL，缺一不可。
+
+## 更新日志
+
+### 0.2.1（2026-10-19 · 界面实现）
+
+**样式工程**
+- 样式拆为四层：`styles/tokens.css`（令牌）→ `base.css`（reset / 选区 / 滚动条）→ `components.css`（按钮、胶囊、卡片、开关、下拉、空状态、骨架、浮条）→ `result.css` / `settings.css`（页面）。两个窗口共用同一套令牌与组件。
+- 页面只通过 `<link>` 引样式；`npm run demo:html` 会自动把样式内联进 `docs/result-demo.html`，演示页仍可单文件分享。
+
+**结果页 · 状态补全**
+- 新增加载骨架（两栏结构与真实内容同形，数据到达不跳布局，`aria-busy` 同步）。
+- 空状态升级为「图标 + 文案 + 补充提示」并纵向居中；无原图时右侧显示虚线占位。
+- 新增选区浮条：松开鼠标即出现「复制」，贴选区下方、放不下翻上方、滚动/塌陷/按下即收起。
+- 单屏时左右分栏撑满窗口高度；窄屏改为按内容顺序堆叠，不再出现中间大片空白。
+- 复制反馈修正：连续点击不会把「已复制」当成原文恢复；切换语言时丢弃旧文案。
+
+**设置页**
+- 接入同一套令牌与组件（按钮、开关、下拉、卡片）；标题区改主色实色面。
+- 布局改纵向弹性（header / scroll / footer），去掉 `calc(100% - 72px - 64px)` 硬编码高度；快捷键框补键盘焦点环。
+
+**自测**
+- `test_result_ui.js` 25 → 39 项（复制反馈宽度、骨架屏与 `aria-busy`、无原图占位、空状态精确文案）全 PASS；
+  `test_i18n_ui.js`、`test_settings.js`、`test_i18n_scan.js` 全 PASS；截图见 `docs/screenshots/design-*.png`。
+
+### 0.2.0（2026-10-19）
+
+**结果页 · 划选**
+- 修复跨行划选被截断：文字区改为单一编辑容器（`.text-panel > .editor > .item`），拖选可跨多行连续选中并保留换行。
+- 守住「1 行 = 1 识别框」：回车不拆行、多行粘贴自动压平，复制全文顺序与识别框一一对应。
+
+**结果页 · 视觉**
+- 选区 / 联动 / 识别框收敛为一条视觉层级：只有文本选区使用实色底，其余用描边、色条与淡底。
+- 正文 14→15px；空状态文字对比度 2.56:1 → 4.76:1；按钮悬停、按下、禁用、成功态统一；拖拽期间抑制悬停底色。
+- 窄屏：上下堆叠、图区限高 42vh、触摸按钮 40px、工具栏不再出现孤行按钮。
+- 窗口缩放后按新宽度重算图片缩放，消除横向溢出与识别框错位。
+
+**自测**
+- `test_result_ui.js` 新增 3 条结构契约断言，共 25 项全 PASS；`test_i18n_ui.js` PASS。

@@ -8,10 +8,65 @@ const { createTray } = require('./tray')
 const { copyText } = require('./clipboard')
 const { getAll, update } = require('./config')
 const { setup: setupUpdater, checkForUpdates } = require('./updater')
+const I18n = require('../shared/i18n')
 const log = require('./log')
 const fs = require('fs')
 
 log.init()
+
+// —— 界面语言 ——
+// 规则：config.language = auto | zh | en（非法值按 auto）
+//   auto → 跟随系统语言 → 仍无法识别则回退 zh
+// 切换后立刻广播给所有窗口，渲染进程就地重绘，无需刷新页面。
+let langSetting = 'auto'
+let currentLang = I18n.DEFAULT_LANG
+
+function detectSystemLang() {
+  try {
+    return app.getSystemLocale() || app.getLocale() || I18n.DEFAULT_LANG
+  } catch {
+    return I18n.DEFAULT_LANG
+  }
+}
+
+function initLanguage() {
+  try { langSetting = I18n.normalizeSetting(getAll().language) } catch { langSetting = 'auto' }
+  currentLang = I18n.resolveLang(langSetting, detectSystemLang())
+  log.info('UI language: setting=' + langSetting + ' resolved=' + currentLang +
+    ' system=' + detectSystemLang())
+}
+
+// 主进程内取译文
+function t(key, params) { return I18n.t(currentLang, key, params) }
+
+initLanguage()
+
+// 广播语言变更：所有窗口重绘 + 托盘菜单重建 + 窗口标题更新
+function broadcastLanguage() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('i18n:changed', { lang: currentLang, setting: langSetting })
+  }
+  if (tray && tray.refresh) tray.refresh()
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.setTitle(t('settings.title'))
+  if (resultWin && !resultWin.isDestroyed()) resultWin.setTitle(t('result.title'))
+}
+
+// 渲染进程初始语言通过窗口的 additionalArguments（--app-lang=xx）注入，
+// 不再使用 sendSync：同步 IPC 在无监听者时会干扰页面导航，且会阻塞渲染线程。
+
+// 设置页切换语言：立即持久化 + 广播（不依赖「保存」按钮）
+ipcMain.handle('i18n:set', (_e, language) => {
+  try {
+    langSetting = I18n.normalizeSetting(language)
+    currentLang = I18n.resolveLang(langSetting, detectSystemLang())
+    update({ language: langSetting })
+    log.info('UI language changed -> ' + langSetting + ' (resolved: ' + currentLang + ')')
+    broadcastLanguage()
+    return { ok: true, lang: currentLang, setting: langSetting }
+  } catch (e) {
+    return { ok: false, lang: currentLang, setting: langSetting, error: e.message }
+  }
+})
 
 // —— GPU 崩溃自动降级 ——
 // 若上次运行期间 GPU 进程崩溃过（部分显卡驱动 / 虚拟化环境下 Chromium 会
@@ -31,17 +86,17 @@ function markGpuCrash(reason) {
 
 // GPU 加速：默认关闭（稳定优先）。仅当用户显式开启且未发生过 GPU 崩溃时才启用。
 let gpuOff = true
-let gpuReason = '默认兼容模式'
+let gpuReason = 'default compatibility mode'
 let crashedBefore = false
 try {
   const cfg = getAll()
   crashedBefore = gpuCrashedBefore()
   if (crashedBefore) {
     gpuOff = true
-    gpuReason = '上次子进程崩溃过，自动降级'
+    gpuReason = 'previous child-process crash, auto downgraded'
   } else if (cfg.disableGpu === false) {
     gpuOff = false
-    gpuReason = '用户开启 GPU 加速'
+    gpuReason = 'user enabled GPU acceleration'
   }
 } catch { /* 配置不可读 → 保持默认兼容模式 */ }
 
@@ -56,9 +111,9 @@ if (crashedBefore) {
   app.commandLine.appendSwitch('disable-setuid-sandbox')
 }
 
-log.info('GPU 硬件加速: ' + (gpuOff || isRdpSession ? '关闭' : '开启') +
-  ' | 原因=' + (isRdpSession ? '远程桌面会话' : gpuReason) +
-  ' | rdp=' + isRdpSession + ' | 崩溃兜底(no-sandbox)=' + crashedBefore)
+log.info('GPU acceleration: ' + (gpuOff || isRdpSession ? 'off' : 'on') +
+  ' | reason=' + (isRdpSession ? 'remote desktop session' : gpuReason) +
+  ' | rdp=' + isRdpSession + ' | crashFallback(no-sandbox)=' + crashedBefore)
 
 // 全局异常也要留痕，否则双击后闪退完全无迹可循
 let crashInThisRun = false // 本次运行是否发生过子进程崩溃
@@ -201,7 +256,7 @@ function showOverlay(cap) {
       y: d.physY,
       width: d.pxWidth,
       height: d.pxHeight,
-      webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false }
+      webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=' + currentLang] }
     })
     win.setAlwaysOnTop(true, 'screen-saver') // 盖在全屏应用之上
     // 构造时窗口可能被收缩到 workArea（丢任务栏），此处显式恢复为整屏物理边界
@@ -262,8 +317,8 @@ function showResultWindow() {
   resultWin = new BrowserWindow({
     width: 720,
     height: 560,
-    title: '识别结果',
-    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false }
+    title: t('result.title'),
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=' + currentLang] }
   })
   resultWin.loadFile(path.join(__dirname, '..', 'renderer', 'result.html'))
   resultWin.webContents.once('did-finish-load', () => {
@@ -282,12 +337,12 @@ function showSettingsWindow() {
     height: 640,
     minWidth: 440,
     minHeight: 520,
-    title: '设置 — 截屏 OCR',
+    title: t('settings.title'),
     resizable: true,
     maximizable: true,
     fullscreenable: false,
     autoHideMenuBar: true,
-    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false }
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=' + currentLang] }
   })
   settingsWin.setMenuBarVisibility(false)
   settingsWin.loadFile(path.join(__dirname, '..', 'renderer', 'settings.html'))
@@ -365,7 +420,7 @@ ipcMain.handle('overlay:dragEnd', () => {
 // IPC：渲染进程已裁好选区（PNG dataURL）→ 交给 OCR
 ipcMain.handle('capture:region', async (_e, dataUrl) => {
   const b64 = String(dataUrl).split(',')[1]
-  if (!b64) throw new Error('选区数据为空')
+  if (!b64) throw new Error('E_EMPTY_SELECTION') // 渲染层按错误码翻译，避免硬编码文案
   const buf = Buffer.from(b64, 'base64')
   const t0 = Date.now()
   const res = await ocr.recognize(buf)
@@ -411,7 +466,8 @@ ipcMain.handle('settings:set', (_e, partial) => {
     // 应用快捷键（失败则回滚旧快捷键并报错）
     if (shortcutChanged) {
       const r = updateShortcut({ onCapture, onQuit: () => app.quit() }, partial.shortcut)
-      if (!r.ok) return { ok: false, error: '该快捷键被其他程序占用，请换一个组合' }
+      // 返回错误码，渲染层按当前语言翻译；error 字段保留给未知调用方兜底
+      if (!r.ok) return { ok: false, errorCode: 'shortcutOccupied', error: t('settings.shortcutOccupied') }
     }
 
     // 应用开机自启
@@ -433,7 +489,7 @@ ipcMain.handle('settings:set', (_e, partial) => {
     if (shortcutChanged && tray && tray.refresh) tray.refresh()
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message }
+    return { ok: false, errorCode: 'unknown', error: e.message }
   }
 })
 
@@ -453,13 +509,19 @@ app.whenReady().then(() => {
   if (!gotLock) { log.info('非主实例，退出'); return } // 非主实例：应用正在退出，不注册任何资源
   log.info('whenReady: 主实例已获得锁')
   registerShortcuts({ onCapture, onQuit: () => app.quit() })
-  tray = createTray({ onCapture, onQuit: () => app.quit(), onSettings: showSettingsWindow })
+  tray = createTray({
+    onCapture,
+    onQuit: () => app.quit(),
+    onSettings: showSettingsWindow,
+    getLang: () => currentLang
+  })
 
-  // 自动更新：状态推送给设置窗口
+  // 自动更新：状态推送给设置窗口；译文随当前语言
   setupUpdater({
     onStatus: (status) => {
       if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('update:status', status)
-    }
+    },
+    t
   })
 
   // 同步开机自启状态到系统

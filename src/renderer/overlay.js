@@ -11,6 +11,34 @@ let myIndex = -1
 let screensReady = false   // 截图数据是否已就绪（「先出遮罩后填图」下，mouseup 需等待）
 let readyResolve = null
 
+// —— 语言 ——
+let lang = I18n.normalizeLang(window.api.initialLanguage)
+function t(key, params) { return I18n.t(lang, key, params) }
+
+// 遮罩页没有常驻静态文案（尺寸提示是纯数字），切换语言只需更新窗口标题
+function applyLanguage(next) {
+  if (next) lang = I18n.normalizeLang(next)
+  document.title = t('overlay.title')
+}
+
+window.api.onLanguageChanged((payload) => {
+  if (payload && payload.lang) applyLanguage(payload.lang)
+})
+
+// 主进程返回的错误码 → 词典 key；未收录的错误保留原始信息
+const ERROR_KEYS = {
+  E_EMPTY_SELECTION: 'overlay.emptySelection',
+  E_OCR_EXITED: 'overlay.ocrExited'
+}
+
+function translateError(err) {
+  const msg = (err && err.message) ? err.message : String(err)
+  if (ERROR_KEYS[msg]) return t(ERROR_KEYS[msg])
+  return t('overlay.error', { message: msg })
+}
+
+applyLanguage(window.api.initialLanguage)
+
 const stage = document.getElementById('stage')
 const screensEl = document.getElementById('screens')
 const sel = document.getElementById('sel')
@@ -273,14 +301,23 @@ document.addEventListener('mouseup', async () => {
   await waitScreensReady() // 先出遮罩后填图：若截图尚未就绪则等待，避免裁到旧图
 
   try {
-    const { canvas, label } = cropRect(rect) || {}
+    const { canvas, label, labelKind, labelIndex } = cropRect(rect) || {}
     if (!canvas) return
     const dataUrl = canvas.toDataURL('image/png')
     const result = await window.api.captureRegion(dataUrl)
-    await window.api.showResult({ screens: [{ label: label || '选区', image: dataUrl, ...result }] })
+    // 屏名不直接写死文案：带上 labelKind/labelIndex，由结果页按当前语言生成
+    await window.api.showResult({
+      screens: [{
+        label: label || t('result.selectionLabel'),
+        labelKind: labelKind || 'selection',
+        labelIndex: labelIndex || 0,
+        image: dataUrl,
+        ...result
+      }]
+    })
     await window.api.closeOverlay()
   } catch (err) {
-    alert('识别失败：' + (err && err.message ? err.message : err))
+    alert(translateError(err))
     await window.api.closeOverlay()
   }
 })

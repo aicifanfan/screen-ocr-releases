@@ -22,6 +22,10 @@ win:
     - zip
   icon: assets/icon.ico
 nsis:
+  # 安装包文件名必须与 latest.yml 里的 url 完全一致，否则自动更新在 GitHub 上找不到资产。
+  # productName 是中文时，默认会写出「截屏OCR Setup 0.2.1.exe」，而清单里写的是
+  # screen-ocr-setup-0.2.1.exe —— 两者不一致会让增量/全量更新都 404。
+  artifactName: screen-ocr-setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

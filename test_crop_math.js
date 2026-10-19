@@ -35,7 +35,9 @@ function eq(name, actual, expect) {
 {
   const p = computeCrop(displays, { x: -300, y: 100, width: 600, height: 200 })
   eq('跨屏 out', [p.outWidth, p.outHeight], [600, 200])
-  eq('跨屏 label', p.label, '跨屏选区')
+  // 跨屏不再写死文案：label 留空，由渲染层按 labelKind 生成当前语言的标题
+  eq('跨屏 label 为空', p.label, '')
+  eq('跨屏 labelKind', p.labelKind, 'cross')
   eq('跨屏 block 数', p.blocks.length, 2)
   // 主屏块：x=0..300 → 源 sx=0..300，目标 dx=300
   eq('跨屏 主屏块', [p.blocks[0].sx, p.blocks[0].sw, p.blocks[0].dx], [0, 300, 300])

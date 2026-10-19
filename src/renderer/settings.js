@@ -1,5 +1,5 @@
-// 设置页逻辑：快捷键录制 + 开关项 + 保存
-const DEFAULTS = { shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, ocrProfile: 'balanced' }
+// 设置页逻辑：快捷键录制 + 开关项 + 语言切换 + 保存
+const DEFAULTS = { shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, ocrProfile: 'balanced', language: 'auto' }
 
 const hotkeyBox = document.getElementById('hotkey-box')
 const hotkeyText = document.getElementById('hotkey-text')
@@ -10,12 +10,48 @@ const optAutoClose = document.getElementById('opt-auto-close')
 const optAutoCheck = document.getElementById('opt-auto-check')
 const optGpu = document.getElementById('opt-gpu')
 const optOcrProfile = document.getElementById('opt-ocr-profile')
+const optLanguage = document.getElementById('opt-language')
 const appVersion = document.getElementById('app-version')
 const btnCheckUpdate = document.getElementById('btn-check-update')
 const updateStatus = document.getElementById('update-status')
 const btnSave = document.getElementById('btn-save')
 const btnCancel = document.getElementById('btn-cancel')
 const hint = document.getElementById('hint')
+
+// —— 语言 ——
+// 主进程在 preload 阶段同步注入当前语言，因此首屏直接是正确的语言
+let lang = I18n.normalizeLang(window.api.initialLanguage)
+let lastUpdateStatus = null // 最近一次更新状态（切换语言时按新语言重绘）
+function t(key, params) { return I18n.t(lang, key, params) }
+
+// 当前语言下重新渲染所有文案（静态 data-i18n + 动态片段）
+function applyLanguage(next) {
+  if (next) lang = I18n.normalizeLang(next)
+  I18n.applyDom(document, lang)
+  document.title = t('settings.title')
+  displayShortcut(pendingShortcut)
+  renderUpdateStatus(lastUpdateStatus)
+}
+
+// 主进程广播语言变更 → 就地重绘，不刷新页面
+window.api.onLanguageChanged((payload) => {
+  if (!payload) return
+  if (payload.setting) optLanguage.value = payload.setting
+  applyLanguage(payload.lang)
+})
+
+// 切换语言：立即生效（不需要点保存）
+optLanguage.addEventListener('change', async () => {
+  const setting = optLanguage.value
+  // 显式语言可先本地渲染（即时反馈）；auto 需要主进程按系统语言解析，避免闪一下再纠正
+  if (setting === 'zh' || setting === 'en') applyLanguage(setting)
+  try {
+    const r = await window.api.setLanguage(setting)
+    if (r && r.lang) applyLanguage(r.lang)
+  } catch (e) {
+    showHint(t('settings.saveFailedWith', { message: (e && e.message) || t('error.unknown') }), true)
+  }
+})
 
 // —— 界面缩放（放大/缩小）——
 const zoomOut = document.getElementById('zoom-out')
@@ -70,14 +106,14 @@ let recording = false
 let pendingShortcut = DEFAULTS.shortcut // 待保存的快捷键（accelerator）
 
 function displayShortcut(acc) {
-  hotkeyText.textContent = Accelerator.acceleratorToDisplay(acc) || '未设置'
+  hotkeyText.textContent = Accelerator.acceleratorToDisplay(acc) || t('common.notSet')
   hotkeyText.classList.toggle('kbd', !acc)
 }
 
 function startRecording() {
   recording = true
   hotkeyBox.classList.add('recording')
-  hotkeyText.textContent = '请按下组合键…'
+  hotkeyText.textContent = t('settings.hotkey.recording')
 }
 
 function stopRecording(committed) {
@@ -121,7 +157,7 @@ hotkeyReset.addEventListener('click', (e) => {
 
 // 保存
 btnSave.addEventListener('click', async () => {
-  if (!pendingShortcut) { showHint('请先设置快捷键', true); startRecording(); return }
+  if (!pendingShortcut) { showHint(t('settings.needShortcut'), true); startRecording(); return }
   const partial = {
     shortcut: pendingShortcut,
     autoLaunch: optAutoLaunch.checked,
@@ -134,13 +170,17 @@ btnSave.addEventListener('click', async () => {
   try {
     const result = await window.api.setSettings(partial)
     if (result && result.ok) {
-      showHint('已保存 ✓')
+      showHint(t('settings.saved'))
       setTimeout(() => window.api.closeSettings(), 500)
+    } else if (result && result.errorCode === 'shortcutOccupied') {
+      showHint(t('settings.shortcutOccupied'), true)
     } else {
-      showHint((result && result.error) || '保存失败', true)
+      showHint(t('settings.saveFailedWith', {
+        message: (result && result.error) || t('error.unknown')
+      }), true)
     }
   } catch (err) {
-    showHint('保存失败：' + (err && err.message ? err.message : err), true)
+    showHint(t('settings.saveFailedWith', { message: (err && err.message) || t('error.unknown') }), true)
   }
 })
 
@@ -148,6 +188,24 @@ btnSave.addEventListener('click', async () => {
 btnCancel.addEventListener('click', () => window.api.closeSettings())
 
 // —— 关于与更新 ——
+// 把主进程推送的状态翻译成当前语言的文案
+function renderUpdateStatus(status) {
+  lastUpdateStatus = status || null
+  if (!status) { showUpdateStatus('', ''); return }
+  switch (status.state) {
+    case 'checking': showUpdateStatus(t('update.checking'), 'info'); break
+    case 'available': showUpdateStatus(t('update.available', { version: (status.info && status.info.version) || '?' }), 'info'); break
+    case 'downloading': showUpdateStatus(t('update.downloading', { percent: status.percent || 0 }), 'info'); break
+    case 'downloaded': showUpdateStatus(t('update.downloaded'), 'ok'); break
+    case 'none': showUpdateStatus(t('update.none'), 'ok'); break
+    case 'error':
+      // 主进程只给错误码/原始信息，文案在这里按语言生成
+      if (status.code === 'devMode') showUpdateStatus(t('update.devMode'), 'error')
+      else showUpdateStatus(t('update.error', { message: status.message || t('update.unknownError') }), 'error')
+      break
+  }
+}
+
 function showUpdateStatus(msg, kind) {
   updateStatus.textContent = msg
   updateStatus.className = 'update-status' + (kind ? ' ' + kind : '')
@@ -157,18 +215,11 @@ function showUpdateStatus(msg, kind) {
 // 订阅主进程推送的更新状态
 window.api.onUpdateStatus((status) => {
   if (!status) return
-  switch (status.state) {
-    case 'checking': showUpdateStatus('正在检查更新…', 'info'); break
-    case 'available': showUpdateStatus('发现新版本 v' + (status.info && status.info.version) + '，开始下载…', 'info'); break
-    case 'downloading': showUpdateStatus('正在下载更新 ' + (status.percent || 0) + '%', 'info'); break
-    case 'downloaded': showUpdateStatus('新版本已下载，重启后生效', 'ok'); break
-    case 'none': showUpdateStatus('已是最新版本', 'ok'); break
-    case 'error': showUpdateStatus('更新失败：' + (status.message || '未知错误'), 'error'); break
-  }
+  renderUpdateStatus(status)
 })
 
 btnCheckUpdate.addEventListener('click', () => {
-  showUpdateStatus('正在检查更新…', 'info')
+  renderUpdateStatus({ state: 'checking' })
   window.api.checkForUpdates()
 })
 
@@ -181,13 +232,17 @@ document.addEventListener('keydown', (e) => {
 async function init() {
   const cfg = (await window.api.getSettings()) || {}
   pendingShortcut = cfg.shortcut || DEFAULTS.shortcut
-  displayShortcut(pendingShortcut)
+
   optAutoLaunch.checked = !!cfg.autoLaunch
   optCaptureLaunch.checked = cfg.captureOnLaunch === true // 默认关闭：需用户主动触发截屏
   optAutoClose.checked = cfg.autoCloseAfterCopy !== false
   optAutoCheck.checked = cfg.autoCheckUpdate !== false
   optGpu.checked = cfg.disableGpu === false // 默认关闭：只有显式设为 false 才启用 GPU
   optOcrProfile.value = cfg.ocrProfile || 'balanced'
+  optLanguage.value = I18n.normalizeSetting(cfg.language)
+
+  // 首次渲染：先用主进程注入的语言，配置里的语言以主进程为准（避免不一致）
+  applyLanguage(window.api.initialLanguage)
 
   // 显示版本号
   try {

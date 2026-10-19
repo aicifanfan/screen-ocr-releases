@@ -10,7 +10,8 @@ const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
 const SETTINGS = path.join(__dirname, 'src', 'renderer', 'settings.html')
 
 // mock 主进程设置 IPC（测试进程不加载 index.js）
-ipcMain.handle('settings:get', () => ({ shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, disableGpu: true, ocrProfile: 'balanced' }))
+ipcMain.handle('i18n:set', (_e, language) => ({ ok: true, lang: language === 'en' ? 'en' : 'zh', setting: language }))
+ipcMain.handle('settings:get', () => ({ shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, disableGpu: true, ocrProfile: 'balanced', language: 'auto' }))
 ipcMain.handle('settings:set', (_e, partial) => ({ ok: true, saved: partial }))
 ipcMain.handle('settings:close', () => {})
 ipcMain.handle('app:version', () => '0.1.0')
@@ -51,7 +52,10 @@ app.whenReady().then(async () => {
       hasAutoCheck: !!document.getElementById('opt-auto-check'),
       hasUpdateStatus: !!document.getElementById('update-status'),
       hasGpuOpt: !!document.getElementById('opt-gpu'),
-      hasOcrProfile: !!document.getElementById('opt-ocr-profile')
+      hasOcrProfile: !!document.getElementById('opt-ocr-profile'),
+      hasLanguage: !!document.getElementById('opt-language'),
+      headerTitle: document.querySelector('.header h1').textContent,
+      langSetting: document.getElementById('opt-language').value
     })`)
     console.log('[OK] DOM 元素:', JSON.stringify(dom))
 
@@ -104,12 +108,13 @@ app.whenReady().then(async () => {
     const ok = ready && dom.hasHotkey && dom.hasAutoLaunch && dom.hasCaptureLaunch && dom.hasAutoClose && dom.hasSave &&
       dom.hasZoomIn && dom.hasZoomOut && dom.hasZoomReset && dom.hasZoomVal &&
       dom.hasVersion && dom.hasCheckUpdate && dom.hasAutoCheck && dom.hasUpdateStatus && dom.hasGpuOpt && dom.hasOcrProfile &&
+      dom.hasLanguage && dom.headerTitle === '截屏 OCR 设置' && dom.langSetting === 'auto' &&
       recorded.text === 'Ctrl + Shift + B' && recorded.recording === false &&
       esc.text === 'Ctrl + Shift + B' && esc.recording === false &&
       zoom.f1 > 1.05 && zoom.l1 === '110%' && zoom.f2 > 1.15 && zoom.l2 === '120%' &&
       zoom.f3 < 1.01 && zoom.l3 === '100%' &&
       update.version === 'v0.1.0' && update.statusText === '正在检查更新…' && update.statusVisible === 'block'
-    console.log(ok ? '[PASS] 设置页加载 + 快捷键录制 + 界面缩放 + 更新区块正确' : '[FAIL] 设置页异常')
+    console.log(ok ? '[PASS] 设置页加载 + 快捷键录制 + 界面缩放 + 更新区块 + 语言入口正确' : '[FAIL] 设置页异常')
     if (!ok) process.exitCode = 1
   } catch (e) {
     console.error('[FAIL]', e && e.message ? e.message : e)

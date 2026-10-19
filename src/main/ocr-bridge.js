@@ -41,7 +41,7 @@ class OcrBridge {
       this.proc = null
       this.ready = false
       // 挂起的请求全部失败
-      for (const [, p] of this.pending) p.reject(new Error('OCR 子进程已退出'))
+      for (const [, p] of this.pending) p.reject(new Error('E_OCR_EXITED'))
       this.pending.clear()
     })
 

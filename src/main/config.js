@@ -14,8 +14,9 @@ const DEFAULTS = {
   autoCloseAfterCopy: true,             // 复制后自动关闭结果窗口
   autoCheckUpdate: true,                // 启动时自动检查更新
   ocrProfile: 'balanced',               // OCR 档位：fast(最快) / balanced(均衡,默认) / accurate(最准)
-  disableGpu: true                      // 兼容模式（默认开启）：关闭 GPU 加速，保证启动稳定；
+  disableGpu: true,                     // 兼容模式（默认开启）：关闭 GPU 加速，保证启动稳定；
                                         // 关闭此项即启用 GPU 硬件加速（拖拽更流畅，但个别显卡驱动可能崩溃）
+  language: 'auto'                      // 界面语言：auto(跟随系统) / zh / en；非法值按 auto 处理
 }
 
 let cache = null

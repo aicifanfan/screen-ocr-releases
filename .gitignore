@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# 打包目录的历史备份（dist_prev / dist_killed 等，勿提交）
+dist_*/
+# 临时验证/截图脚本
+.tmp-demo/
 out/
 __pycache__/
 *.pyc

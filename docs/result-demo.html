@@ -1,0 +1,2073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<!-- 自动生成，请勿手改：npm run demo:html（源：src/renderer/result.html） -->
+<meta charset="UTF-8">
+<title></title>
+<style>
+/* styles/tokens.css */
+/* ============================================================
+   设计令牌 · 全站唯一来源
+   ------------------------------------------------------------
+   规则（与《OCR 文本选择界面 · 视觉美化改造方案》§3 一致）：
+     1. 全界面只有「文本选区」使用实色底，其余状态一律
+        用描边 / 色条 / ≤12% 淡底表达；
+     2. --sel-bg / --sel-text 必须保持字面 hex：
+        test_result_ui.js 用 parseInt(hex) 解析，函数式颜色会让测试崩；
+     3. 新增颜色先在这里定义语义名，页面样式里不再出现裸 hex。
+   ============================================================ */
+
+:root {
+  /* —— 表面：0 画布 → 1 分区 —— */
+  --bg: #ffffff;
+  --bg-subtle: #f8fafc;
+  --bg-muted: #f1f5f9;
+  --bg-active: #e8eef6;
+  --border: #e6ebf2;
+  --border-strong: #cbd5e1;
+  --border-hover: #c3d0e2;
+
+  /* —— 文字 —— */
+  --text: #0f172a;        /* 标题 */
+  --text-body: #1f2937;   /* 正文：14.68:1 on #fff */
+  --text-muted: #64748b;  /* 次要：4.76:1 on #fff */
+  --text-dim: #94a3b8;    /* 仅用于禁用态/装饰 */
+
+  /* —— 主色 —— */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-active: #1e40af;
+  --primary-soft: #eff6ff;
+  --primary-ring: rgba(37, 99, 235, 0.16);
+  --primary-border: #dbe7fe;
+  --on-primary: #ffffff;
+
+  /* —— 状态阶梯：2 悬停 → 3 联动 → 4 框选 → 5 文本选中 —— */
+  --tint-hover: #f4f7fb;
+  --tint-link: var(--primary-soft);
+  --tint-box: rgba(37, 99, 235, 0.12);
+  --box-border: rgba(37, 99, 235, 0.38);
+  --box-hover: rgba(37, 99, 235, 0.08);
+
+  /* —— 文本选区（WCAG AAA，约 10.2:1）—— */
+  --sel-bg: #c9dcfd;
+  --sel-text: #0b2b52;
+
+  /* —— 语义色：成功 / 危险 —— */
+  --ok: #15803d;
+  --ok-soft: #ecfdf5;
+  --ok-border: #86efac;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+  --danger-border: #fecaca;
+
+  /* —— 尺寸 —— */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* —— 高度：控件 / 触摸目标 —— */
+  --h-control: 32px;
+  --h-touch: 36px;
+  --h-touch-lg: 40px;
+
+  /* —— 阴影 —— */
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-2: 0 1px 3px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  --shadow-pop: 0 6px 20px rgba(15, 23, 42, 0.28);
+
+  /* —— 动效 —— */
+  --dur: 0.15s;
+  --dur-fast: 0.1s;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* —— 字体 —— */
+  --font-sans: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+</style>
+<style>
+/* styles/base.css */
+/* ============================================================
+   基础层 · reset + 全局排版 + 系统偏好
+   ------------------------------------------------------------
+   只放「所有窗口都成立」的规则；任何与具体页面结构相关的
+   选择器都放到 components.css 或各页面的样式文件里。
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  height: 100%;
+  font: 14px/1.7 var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 文本选区：全页统一（含 contentEditable）。
+   必须保持字面 hex —— 测试按 hex 解析 --sel-bg / --sel-text。 */
+::selection {
+  background-color: var(--sel-bg);
+  color: var(--sel-text);
+}
+
+/* 统一的键盘焦点环：鼠标点击不出现，Tab 聚焦才出现 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 滚动条：全局一套，避免每个面板各写一遍 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-md);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: #7c8899;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 拖拽选字期间由 JS 打上；这里只做「全局禁止误选」的兜底 */
+body.is-selecting {
+  cursor: text;
+}
+
+/* 尊重系统「减少动态效果」：动效归零，但保留可见的状态变化 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+</style>
+<style>
+/* styles/components.css */
+/* ============================================================
+   组件层 · 可跨页面复用的原子组件
+   ------------------------------------------------------------
+   命名约定：
+     .block                 结构块（.btn / .card / .pill）
+     .block-element         结构内的元素（.empty-text / .skeleton-line）
+     .block-variant         与结构强绑定的变体（.btn-primary / .btn-ghost）
+     .is-state              运行期状态（.is-done / .is-count / .is-selecting）
+     --x                    设计令牌（见 tokens.css）
+
+   新增样式时优先复用这里的组件，不要在页面里复制一份按钮/胶囊。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   按钮
+   ------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--h-touch);
+  padding: 0 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text-body);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.btn:hover {
+  background: var(--bg-muted);
+  border-color: var(--border-hover);
+}
+
+.btn:active {
+  background: var(--bg-active);
+  transform: translateY(0.5px);
+}
+
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.24);
+}
+.btn-primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.btn-primary:active {
+  background: var(--primary-active);
+  border-color: var(--primary-active);
+}
+
+.btn-ghost {
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover {
+  background: var(--bg-muted);
+  border-color: transparent;
+  color: var(--text-body);
+}
+
+.btn-sm {
+  height: var(--h-control);
+  padding: 0 14px;
+}
+
+/* 成功态：浅底 + 深绿字，避免整块高饱和填充造成视觉跳变 */
+.btn.is-done,
+.btn.is-done:hover {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok);
+  box-shadow: none;
+}
+
+/* 不可用：中性底 + 弱化字，比整体半透明更清晰（仍保持 4.5:1 可读性语义） */
+.btn:disabled,
+.btn:disabled:hover,
+.btn:disabled:active {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text-dim);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 与文字/图标无关的纯文字按钮（如「重置」） */
+.btn-link {
+  height: auto;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-link:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------
+   状态胶囊：视觉权重低于按钮
+   ------------------------------------------------------------ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 计数态：主色浅底，和临时提示（灰底）区分开 */
+.pill.is-count {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------
+   卡片：设置页等纵向表单的容器
+   ------------------------------------------------------------ */
+.card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+.card + .card {
+  margin-top: var(--space-3);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 14px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.card-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ------------------------------------------------------------
+   开关：label.switch > input + .track + .thumb
+   ------------------------------------------------------------ */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  transition: background-color 0.18s var(--ease);
+}
+.switch .thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+  transition: transform 0.18s var(--ease);
+}
+.switch input:checked + .track {
+  background: var(--primary);
+}
+.switch input:checked ~ .thumb {
+  transform: translateX(18px);
+}
+.switch input:focus-visible + .track {
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+.switch input:disabled {
+  cursor: not-allowed;
+}
+.switch input:disabled + .track {
+  background: var(--bg-active);
+}
+.switch input:disabled ~ .thumb {
+  box-shadow: var(--shadow-1);
+}
+
+/* ------------------------------------------------------------
+   下拉选择
+   ------------------------------------------------------------ */
+.select {
+  min-width: 120px;
+  max-width: 60%;
+  height: var(--h-control);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+.select:hover {
+  border-color: var(--border-strong);
+}
+.select:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+.select:disabled {
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------
+   空状态：图标 + 文案（+ 可选提示）
+   ------------------------------------------------------------ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 28px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  user-select: none;
+}
+.empty-icon {
+  display: block;
+  width: 36px;
+  height: 36px;
+  color: var(--border-strong);
+}
+.empty-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.empty-text {
+  max-width: 34em;
+}
+.empty-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------
+   加载骨架：结构与真实两栏一致，切换时不跳动
+   ------------------------------------------------------------ */
+.skeleton {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.skeleton-col {
+  display: flex;
+  flex: 1 1 50%;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.skeleton-col.is-media {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.skeleton-line,
+.skeleton-block {
+  border-radius: 6px;
+  background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 37%, #eef2f7 63%);
+  background-size: 400% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+.skeleton-line {
+  height: 13px;
+}
+.skeleton-block {
+  flex: 1 1 auto;
+  min-height: 180px;
+  border-radius: var(--radius-sm);
+}
+@keyframes skeleton-sweep {
+  from { background-position: 100% 50%; }
+  to { background-position: 0 50%; }
+}
+
+/* ------------------------------------------------------------
+   选区浮条：选中文字后就近提供「复制」
+   ------------------------------------------------------------ */
+.sel-pill {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--text);
+  box-shadow: var(--shadow-pop);
+  animation: pill-in 0.12s var(--ease);
+  will-change: transform;
+}
+.sel-pill[hidden] {
+  display: none;
+}
+.sel-pill .btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font-size: 12.5px;
+}
+.sel-pill .btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.sel-pill .btn:active {
+  background: rgba(255, 255, 255, 0.22);
+  transform: none;
+}
+@keyframes pill-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ------------------------------------------------------------
+   高对比度模式：系统接管颜色时，只补不依赖颜色的结构提示
+   ------------------------------------------------------------ */
+@media (forced-colors: active) {
+  .btn,
+  .card,
+  .select,
+  .sel-pill {
+    border: 1px solid CanvasText;
+  }
+  .btn:disabled {
+    color: GrayText;
+  }
+  .switch input:checked + .track {
+    background: Highlight;
+  }
+}
+
+</style>
+<style>
+/* styles/result.css */
+/* ============================================================
+   结果页布局
+   ------------------------------------------------------------
+   DOM 契约（测试与交互依赖，不要改）：
+     .main > .screen-group > .screen-body > .text-panel | .img-panel
+     .text-panel > .editor[contenteditable] > .item*
+     .img-panel > .img-wrap > img + .box-layer > .box*
+   ============================================================ */
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------
+   工具栏
+   ------------------------------------------------------------ */
+.toolbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) 10px;
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+
+.toolbar .btn {
+  height: var(--h-control);
+  padding: 0 14px;
+}
+.toolbar .btn-ghost {
+  padding: 0 10px;
+}
+
+.toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--dur);
+}
+.toolbar label:hover {
+  color: var(--text-body);
+}
+/* 操作区与选项区的分隔：伪元素实现，不新增 DOM */
+.toolbar label:first-of-type::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin-right: 2px;
+  background: var(--border);
+}
+.toolbar input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.toolbar input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 状态 / 选中计数：靠右，宽度锁定，避免数字变化推挤右侧按钮 */
+#status {
+  margin-left: auto;
+}
+#status:empty {
+  padding: 0;
+  background: transparent;
+}
+#status:not(:empty) {
+  min-width: 6.5em;
+  animation: status-in 0.18s var(--ease);
+}
+@keyframes status-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 非文本区域不参与划选：避免从文字区往上拖时把屏名、按钮文案选进选区 */
+.toolbar,
+.screen-title,
+.img-panel,
+.empty,
+.empty-hint,
+.img-empty { user-select: none; }
+
+/* ------------------------------------------------------------
+   内容区
+   ------------------------------------------------------------ */
+.main {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.screen-group {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.screen-group:last-child {
+  border-bottom: none;
+}
+
+/* 单屏时让分栏撑满内容区：否则窗口一高，下半屏就是一片空白 */
+.screen-group:only-child {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.screen-group:only-child .screen-body {
+  flex: 1 1 auto;
+}
+.screen-group:only-child .text-panel {
+  max-height: none;
+}
+
+.screen-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.screen-body {
+  display: flex;
+  min-height: 120px;
+}
+
+.text-panel {
+  flex: 1 1 50%;
+  min-width: 0;
+  max-height: 420px;
+  padding: var(--space-3) var(--space-2);
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  /* 滚到底不把滚动传给外层，避免拖选时整页跳动 */
+  overscroll-behavior: contain;
+}
+
+.img-panel {
+  position: relative;
+  flex: 1 1 50%;
+  min-width: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  background: var(--bg-subtle);
+  overscroll-behavior: contain;
+}
+
+.img-wrap {
+  position: relative;
+  display: inline-block;
+  background: #fff;
+  box-shadow: var(--shadow-2);
+}
+.img-wrap img {
+  display: block;
+  max-width: 100%;
+}
+.box-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 无原图时的占位：保持两栏结构，不出现"右边一片空白" */
+.img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 识别框：默认只描边，让原图保持干净；交互时才上淡底 */
+.box {
+  position: absolute;
+  border: 1px solid var(--box-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    border-color var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+.box:hover {
+  border-color: var(--primary);
+  background: var(--box-hover);
+}
+.box.active {
+  z-index: 1;
+  border: 2px solid var(--primary-hover);
+  background: var(--tint-box);
+  box-shadow: 0 0 0 2px var(--primary-ring);
+}
+
+/* ------------------------------------------------------------
+   文字块
+   ------------------------------------------------------------ */
+.item {
+  /* 纵向 padding 必须为 0：多行连续划选时高亮不断裂（测试断言 padding-top=0） */
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  caret-color: var(--primary);
+  /* 状态切换不做过渡：拖选时背景必须即时跟随指针，否则像"高亮追鼠标" */
+}
+
+/* 悬停只做极淡提示 */
+.item:hover {
+  background: var(--tint-hover);
+}
+
+/* 联动指向（点击文字/识别框）：浅蓝底 + 左侧主色条，与「选区」区分开 */
+.item.active {
+  background: var(--tint-link);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+/* 编辑根的焦点反馈由插入符承担：整块描边会像输入框，并与选区、联动抢视觉 */
+.editor {
+  outline: none;
+  min-height: 100%;
+}
+
+/* 单屏内的空状态：比整页空状态更紧凑，避免撑高行 */
+.text-panel .empty {
+  padding: 20px var(--space-2);
+}
+.text-panel .empty-icon {
+  width: 26px;
+  height: 26px;
+}
+
+/* 整页空状态：在内容区里纵向居中，提示行紧跟文案 */
+.empty-state {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+.empty-state .empty {
+  padding-bottom: 4px;
+}
+
+/* ------------------------------------------------------------
+   拖拽态 / 触摸设备
+   ------------------------------------------------------------ */
+/* 拖拽选字期间不再响应悬停：高亮只跟随选区，不跟随指针 */
+body.is-selecting .item:hover:not(.active) {
+  background: transparent;
+}
+body.is-selecting .box:hover:not(.active) {
+  border-color: var(--box-border);
+  background: transparent;
+}
+
+/* 触摸设备没有真正的 hover：去掉会「粘住」的悬停态（不能盖掉 .active） */
+@media (hover: none) {
+  .item:hover:not(.active) {
+    background: transparent;
+  }
+  .box:hover:not(.active) {
+    border-color: var(--box-border);
+    background: transparent;
+  }
+}
+
+/* 触摸 / 触控笔：只调行高与按钮高度，不加上下 padding（否则选区断带） */
+@media (pointer: coarse) {
+  .toolbar .btn {
+    height: var(--h-touch-lg);
+    padding: 0 14px;
+  }
+  .item {
+    line-height: 1.8;
+  }
+}
+
+/* ------------------------------------------------------------
+   窄屏：左右分栏 → 上下堆叠
+   ------------------------------------------------------------ */
+@media (max-width: 760px) {
+  .screen-body {
+    flex-direction: column;
+  }
+  /* 堆叠后按内容高度排列：文字多高就多高，图片紧跟其后，不在中间留空 */
+  .screen-body > .text-panel,
+  .screen-body > .img-panel {
+    flex: 0 0 auto;
+  }
+  .screen-group:only-child .screen-body {
+    flex: 0 0 auto;
+  }
+  .text-panel {
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  /* 图区限高：堆叠后不让图片把文字挤出首屏 */
+  .img-panel {
+    max-height: 42vh;
+  }
+
+  .toolbar {
+    padding: var(--space-2) var(--space-3);
+    gap: 6px var(--space-2);
+  }
+  .toolbar .btn {
+    height: var(--h-touch);
+    padding: 0 var(--space-3);
+  }
+  .toolbar label:first-of-type::before {
+    display: none;
+  }
+  /* 不要占满整行：否则会把右侧「设置」挤到独立的一行 */
+  #status {
+    flex-basis: auto;
+    margin-left: 0;
+  }
+  /* 末尾按钮自己吃掉剩余空间：换行时靠右，而不是孤零零留在左侧 */
+  #btn-settings {
+    margin-left: auto;
+  }
+
+  /* 密集 OCR 文本在窄栏里略松一行，减少串行 */
+  .item {
+    padding: 0 var(--space-3);
+    line-height: 1.75;
+  }
+
+  /* 骨架屏同样堆叠，避免加载完成时布局跳动 */
+  .skeleton {
+    flex-direction: column;
+  }
+  .skeleton-col.is-media {
+    min-height: 140px;
+  }
+}
+
+/* ------------------------------------------------------------
+   高对比度模式：补上不依赖颜色的结构提示
+   ------------------------------------------------------------ */
+@media (forced-colors: active) {
+  .item.active {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  .box {
+    border-color: CanvasText;
+  }
+  .box.active {
+    border-color: Highlight;
+  }
+}
+
+</style>
+</head>
+<body>
+  <div class="toolbar" role="toolbar">
+    <button id="btn-copy-all" class="btn btn-sm btn-primary" data-i18n="result.copyAll"></button>
+    <button id="btn-copy-sel" class="btn btn-sm" data-i18n="result.copySel" disabled></button>
+    <label><input type="checkbox" id="toggle-boxes" checked> <span data-i18n="result.showBoxes"></span></label>
+    <label data-i18n-title="result.autoCloseTitle"><input type="checkbox" id="auto-close" checked> <span data-i18n="result.autoClose"></span></label>
+    <span id="status" class="pill" role="status" aria-live="polite"></span>
+    <button id="btn-settings" class="btn btn-sm btn-ghost" data-i18n="result.settings" data-i18n-title="result.settingsTitle"></button>
+  </div>
+  <div class="main" id="main" aria-busy="false"></div>
+  <script>
+// 轻量国际化（i18n）模块
+//
+// 同时供两类进程使用：
+//   - 主进程：const I18n = require('../shared/i18n')
+//   - 渲染进程：<script src="../shared/i18n.js"><\/script> → window.I18n
+//
+// 设计要点：
+//   1. 单一词典来源，避免中英文案分散在各处导致漏译；
+//   2. 缺失 key 时按「当前语言 → 中文 → key 本身」回退，保证界面永远有内容；
+//   3. 占位符统一用 {name}，同一 key 在两种语言下的占位符必须一致（有单测保证）；
+//   4. applyDom() 扫描 data-i18n / data-i18n-title / data-i18n-placeholder，
+//      切换语言时重新扫描即可，不需要刷新页面。
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory() // Node / Electron 主进程
+  } else {
+    root.I18n = factory() // 渲染进程
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict'
+
+  // —— 支持的语言 ——
+  const LANGS = ['zh', 'en']
+  const DEFAULT_LANG = 'zh' // 兜底语言：任何无法识别的情况都回退到中文
+
+  // —— 词典 ——
+  // 约定：key 使用「模块.用途」命名；占位符 {x} 必须两种语言一致。
+  const MESSAGES = {
+    zh: {
+      // 通用
+      'app.name': '截屏 OCR',
+
+      // 托盘
+      'tray.capture': '截屏识别（{shortcut}）',
+      'tray.settings': '设置…',
+      'tray.quit': '退出',
+      'tray.tooltip': '截屏 OCR — 按 {shortcut} 截屏识别文字',
+      'common.notSet': '未设置',
+
+      // 窗口标题
+      'settings.title': '设置 — 截屏 OCR',
+      'result.title': '识别结果',
+      'overlay.title': '截屏选区',
+
+      // 设置页：头部
+      'settings.header.title': '截屏 OCR 设置',
+      'settings.header.subtitle': '截图、识别与启动行为',
+      'settings.zoom.out': '缩小（Ctrl+-）',
+      'settings.zoom.in': '放大（Ctrl+=）',
+      'settings.zoom.reset': '重置',
+      'settings.zoom.resetTitle': '重置为 100%（Ctrl+0）',
+
+      // 设置页：语言
+      'settings.card.language': '语言',
+      'settings.language.label': '界面语言',
+      'settings.language.desc': '切换后立即生效，无需保存；「跟随系统」按 Windows 语言自动选择',
+      'settings.language.auto': '跟随系统',
+      'settings.language.zh': '中文',
+      'settings.language.en': 'English',
+
+      // 设置页：快捷键
+      'settings.card.hotkey': '快捷键',
+      'settings.hotkey.label': '截图识别快捷键',
+      'settings.hotkey.desc': '点击右侧框，然后按下新的组合键',
+      'settings.hotkey.boxTitle': '点击后按下新组合键',
+      'settings.hotkey.reset': '重置',
+      'settings.hotkey.resetTitle': '恢复默认',
+      'settings.hotkey.recording': '请按下组合键…',
+
+      // 设置页：通用
+      'settings.card.general': '通用',
+      'settings.ocr.label': '识别精度',
+      'settings.ocr.desc': '均衡：速度与准确度兼顾（推荐）；高精度更准但明显更慢；快速适合大段文字',
+      'settings.ocr.fast': '快速',
+      'settings.ocr.balanced': '均衡',
+      'settings.ocr.accurate': '高精度',
+      'settings.autoLaunch.label': '开机自启动',
+      'settings.autoLaunch.desc': '登录 Windows 后自动在后台运行',
+      'settings.captureLaunch.label': '启动时立即截屏',
+      'settings.captureLaunch.desc': '默认关闭。关闭时程序启动后只在托盘待命，由快捷键 / 托盘菜单主动触发截屏',
+      'settings.autoClose.label': '复制后自动关闭结果',
+      'settings.autoClose.desc': '复制文字后关闭结果窗口，便于直接粘贴',
+      'settings.gpu.label': 'GPU 硬件加速（实验性）',
+      'settings.gpu.desc': '关闭时走兼容模式（更稳定，默认开启）；开启后框选拖拽更流畅，但个别显卡驱动可能导致启动失败（崩溃后会自动降级）',
+
+      // 设置页：关于与更新
+      'settings.card.about': '关于与更新',
+      'settings.version.label': '当前版本',
+      'settings.version.desc': '自动检查 GitHub Releases 上的新版本',
+      'settings.version.check': '检查更新',
+      'settings.autoCheck.label': '启动时自动检查更新',
+      'settings.autoCheck.desc': '打开应用后在后台静默检查新版本',
+
+      // 设置页：底部与提示
+      'settings.save': '保存',
+      'settings.cancel': '取消',
+      'settings.saved': '已保存 ✓',
+      'settings.saveFailed': '保存失败',
+      'settings.saveFailedWith': '保存失败：{message}',
+      'settings.needShortcut': '请先设置快捷键',
+      'settings.shortcutOccupied': '该快捷键被其他程序占用，请换一个组合',
+
+      // 更新状态
+      'update.checking': '正在检查更新…',
+      'update.available': '发现新版本 v{version}，开始下载…',
+      'update.downloading': '正在下载更新 {percent}%',
+      'update.downloaded': '新版本已下载，重启后生效',
+      'update.none': '已是最新版本',
+      'update.error': '更新失败：{message}',
+      'update.devMode': '开发模式不支持自动更新，请安装正式版后使用',
+      'update.unknownError': '未知错误',
+      'update.dialogTitle': '更新就绪',
+      'update.dialogMessage': '新版本已下载完成',
+      'update.dialogDetail': '点击「立即重启」马上安装并重启应用；或选择「稍后」，退出时自动安装。',
+      'update.restartNow': '立即重启',
+      'update.later': '稍后',
+
+      // 结果页
+      'result.copyAll': '复制全文',
+      'result.copySel': '复制选中',
+      'result.showBoxes': '显示识别框',
+      'result.autoClose': '复制后关闭',
+      'result.autoCloseTitle': '复制后自动关闭结果窗口，便于直接粘贴到别处',
+      'result.settings': '⚙ 设置',
+      'result.settingsTitle': '打开设置',
+      'result.copied': '已复制✓',
+      'result.copiedAll': '已复制全文',
+      'result.copiedSel': '已复制选中内容',
+      'result.selectFirst': '请先划选文字',
+      'result.selectedChars': '已选 {n} 字',
+      'result.empty': '（未识别到文字）',
+      'result.emptyHint': '换一块区域重新截屏，或确认截图中包含文字',
+      'result.noImage': '无原图',
+      'result.copy': '复制',
+      'result.screenN': '屏幕 {n}',
+      'result.primaryScreen': '主屏',
+      'result.secondaryScreenN': '副屏 {n}',
+      'result.crossScreen': '跨屏选区',
+      'result.confidence': '置信度 {percent}%',
+      'result.imageAlt': '截图',
+      'result.selectionLabel': '选区',
+
+      // 遮罩页
+      'overlay.error': '识别失败：{message}',
+      'overlay.emptySelection': '选区数据为空',
+      'overlay.ocrExited': '识别服务已退出，请重试',
+      'overlay.captureFailed': '截图失败：{message}',
+
+      // 主进程：设置保存错误
+      'error.unknown': '未知错误'
+    },
+
+    en: {
+      'app.name': 'Screen OCR',
+
+      'tray.capture': 'Capture Text ({shortcut})',
+      'tray.settings': 'Settings…',
+      'tray.quit': 'Quit',
+      'tray.tooltip': 'Screen OCR — press {shortcut} to capture text',
+      'common.notSet': 'Not set',
+
+      'settings.title': 'Settings — Screen OCR',
+      'result.title': 'Recognition Result',
+      'overlay.title': 'Screen Capture',
+
+      'settings.header.title': 'Screen OCR Settings',
+      'settings.header.subtitle': 'Capture, recognition and startup',
+      'settings.zoom.out': 'Zoom out (Ctrl+-)',
+      'settings.zoom.in': 'Zoom in (Ctrl+=)',
+      'settings.zoom.reset': 'Reset',
+      'settings.zoom.resetTitle': 'Reset to 100% (Ctrl+0)',
+
+      'settings.card.language': 'Language',
+      'settings.language.label': 'Interface language',
+      'settings.language.desc': 'Takes effect immediately, no save needed. "System" follows your Windows language.',
+      'settings.language.auto': 'System',
+      'settings.language.zh': '中文',
+      'settings.language.en': 'English',
+
+      'settings.card.hotkey': 'Shortcut',
+      'settings.hotkey.label': 'Capture shortcut',
+      'settings.hotkey.desc': 'Click the box, then press a new key combination',
+      'settings.hotkey.boxTitle': 'Click, then press a new combination',
+      'settings.hotkey.reset': 'Reset',
+      'settings.hotkey.resetTitle': 'Restore default',
+      'settings.hotkey.recording': 'Press a key combination…',
+
+      'settings.card.general': 'General',
+      'settings.ocr.label': 'Recognition accuracy',
+      'settings.ocr.desc': 'Balanced: good speed and accuracy (recommended). Accurate is better but slower. Fast suits large blocks of text.',
+      'settings.ocr.fast': 'Fast',
+      'settings.ocr.balanced': 'Balanced',
+      'settings.ocr.accurate': 'Accurate',
+      'settings.autoLaunch.label': 'Launch at login',
+      'settings.autoLaunch.desc': 'Run in the background after you sign in to Windows',
+      'settings.captureLaunch.label': 'Capture on launch',
+      'settings.captureLaunch.desc': 'Off by default. When off, the app waits in the tray and captures only when triggered by shortcut or tray menu.',
+      'settings.autoClose.label': 'Close result after copy',
+      'settings.autoClose.desc': 'Close the result window after copying so you can paste right away',
+      'settings.gpu.label': 'GPU acceleration (experimental)',
+      'settings.gpu.desc': 'Off uses compatibility mode (more stable, default). On gives smoother dragging, but some GPU drivers may prevent startup (auto-fallback after a crash).',
+
+      'settings.card.about': 'About & updates',
+      'settings.version.label': 'Current version',
+      'settings.version.desc': 'Automatically checks for new versions on GitHub Releases',
+      'settings.version.check': 'Check for updates',
+      'settings.autoCheck.label': 'Check for updates on launch',
+      'settings.autoCheck.desc': 'Silently check for new versions in the background',
+
+      'settings.save': 'Save',
+      'settings.cancel': 'Cancel',
+      'settings.saved': 'Saved ✓',
+      'settings.saveFailed': 'Save failed',
+      'settings.saveFailedWith': 'Save failed: {message}',
+      'settings.needShortcut': 'Set a shortcut first',
+      'settings.shortcutOccupied': 'That shortcut is already used by another program. Please choose another.',
+
+      'update.checking': 'Checking for updates…',
+      'update.available': 'New version v{version} found, downloading…',
+      'update.downloading': 'Downloading update {percent}%',
+      'update.downloaded': 'Update downloaded, restart to apply',
+      'update.none': "You're on the latest version",
+      'update.error': 'Update failed: {message}',
+      'update.devMode': 'Auto-update is unavailable in dev mode. Please install the release build.',
+      'update.unknownError': 'Unknown error',
+      'update.dialogTitle': 'Update ready',
+      'update.dialogMessage': 'The new version has been downloaded',
+      'update.dialogDetail': 'Click "Restart now" to install and restart immediately, or "Later" to install when you quit.',
+      'update.restartNow': 'Restart now',
+      'update.later': 'Later',
+
+      'result.copyAll': 'Copy all',
+      'result.copySel': 'Copy selection',
+      'result.showBoxes': 'Show boxes',
+      'result.autoClose': 'Close after copy',
+      'result.autoCloseTitle': 'Close the result window after copying so you can paste elsewhere',
+      'result.settings': '⚙ Settings',
+      'result.settingsTitle': 'Open settings',
+      'result.copied': 'Copied ✓',
+      'result.copiedAll': 'Copied all',
+      'result.copiedSel': 'Copied selection',
+      'result.selectFirst': 'Select some text first',
+      'result.selectedChars': '{n} selected',
+      'result.empty': '(No text recognized)',
+      'result.emptyHint': 'Capture a different area, or make sure the screenshot contains text',
+      'result.noImage': 'No image',
+      'result.copy': 'Copy',
+      'result.screenN': 'Screen {n}',
+      'result.primaryScreen': 'Primary screen',
+      'result.secondaryScreenN': 'Secondary screen {n}',
+      'result.crossScreen': 'Cross-screen selection',
+      'result.confidence': 'Confidence {percent}%',
+      'result.imageAlt': 'Screenshot',
+      'result.selectionLabel': 'Selection',
+
+      'overlay.error': 'Recognition failed: {message}',
+      'overlay.emptySelection': 'Empty selection data',
+      'overlay.ocrExited': 'The recognition service has stopped. Please try again.',
+      'overlay.captureFailed': 'Capture failed: {message}',
+
+      'error.unknown': 'Unknown error'
+    }
+  }
+
+  // 语言别名 → 内部标准代码
+  const ALIASES = {
+    zh: 'zh', 'zh-cn': 'zh', 'zh-hans': 'zh', 'zh-sg': 'zh', chinese: 'zh', '中文': 'zh',
+    en: 'en', 'en-us': 'en', 'en-gb': 'en', english: 'en', '英文': 'en'
+  }
+
+  /**
+   * 把任意输入归一化为标准语言代码。
+   * 无法识别时返回 fallback（默认 zh），保证永远有可用语言。
+   */
+  function normalizeLang(value, fallback) {
+    const fb = fallback || DEFAULT_LANG
+    if (!value || typeof value !== 'string') return fb
+    const key = value.trim().toLowerCase().replace(/_/g, '-')
+    if (ALIASES[key]) return ALIASES[key]
+    // 形如 zh-Hans-CN / en-AU 的更长标签，取主语言
+    const primary = key.split('-')[0]
+    if (ALIASES[primary]) return ALIASES[primary]
+    return fb
+  }
+
+  /**
+   * 解析「设置项 + 系统语言」得到最终语言。
+   * setting: 'auto' | 'zh' | 'en'；非法值一律按 auto 处理。
+   * 回退顺序：显式设置 → 系统语言 → 默认语言（zh）
+   */
+  function resolveLang(setting, systemLang) {
+    const s = normalizeSetting(setting)
+    if (s === 'auto') return normalizeLang(systemLang, DEFAULT_LANG)
+    return s
+  }
+
+  /** 是否为受支持的设置值（auto/zh/en），否则回落到 auto */
+  function normalizeSetting(setting) {
+    const s = typeof setting === 'string' ? setting.trim().toLowerCase() : 'auto'
+    if (s === 'auto' || s === 'zh' || s === 'en') return s
+    return 'auto'
+  }
+
+  function interpolate(text, params) {
+    if (!params) return text
+    return text.replace(/\{(\w+)\}/g, (m, name) => {
+      const v = params[name]
+      return v === undefined || v === null ? m : String(v)
+    })
+  }
+
+  /**
+   * 取译文。回退链：当前语言 → 中文（DEFAULT_LANG）→ key 本身。
+   * 这样即使漏译也不会出现空白或报错。
+   */
+  function t(lang, key, params) {
+    const l = normalizeLang(lang, DEFAULT_LANG)
+    const table = MESSAGES[l] || {}
+    let text = table[key]
+    if (text === undefined) text = MESSAGES[DEFAULT_LANG][key]
+    if (text === undefined) return key
+    return interpolate(text, params)
+  }
+
+  /**
+   * 把 DOM 里带标记的元素翻译成目标语言。
+   *   data-i18n            → textContent
+   *   data-i18n-title      → title 属性
+   *   data-i18n-placeholder→ placeholder 属性
+   * 同时同步 <html lang>，便于系统按语言选择字体/断词规则。
+   */
+  function applyDom(root, lang) {
+    if (!root || !root.querySelectorAll) return
+    const l = normalizeLang(lang, DEFAULT_LANG)
+    const doc = root.ownerDocument || root
+    root.querySelectorAll('[data-i18n]').forEach((el) => {
+      el.textContent = t(l, el.getAttribute('data-i18n'))
+    })
+    root.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      el.setAttribute('title', t(l, el.getAttribute('data-i18n-title')))
+    })
+    root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+      el.setAttribute('placeholder', t(l, el.getAttribute('data-i18n-placeholder')))
+    })
+    if (doc && doc.documentElement) {
+      doc.documentElement.lang = l === 'en' ? 'en' : 'zh-CN'
+    }
+  }
+
+  /** 暴露词典（只读用途：测试 / 调试） */
+  function messages() { return MESSAGES }
+
+  return { LANGS, DEFAULT_LANG, MESSAGES, normalizeLang, normalizeSetting, resolveLang, t, applyDom, messages }
+})
+
+</script>
+  
+<script>
+/* 演示用的主进程替身：只实现结果页会调用到的接口 */
+(function () {
+  var SAMPLE = {"screens":[{"label":"","image":"data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22720%22%20height%3D%22340%22%3E%0A%20%20%20%20%3Crect%20width%3D%22720%22%20height%3D%22340%22%20fill%3D%22%23ffffff%22%2F%3E%0A%20%20%20%20%3Crect%20x%3D%220%22%20y%3D%220%22%20width%3D%22720%22%20height%3D%2234%22%20fill%3D%22%23f1f5f9%22%2F%3E%0A%20%20%20%20%3Ctext%20x%3D%2226%22%20y%3D%2223%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2213%22%20fill%3D%22%2364748b%22%3E%E8%AE%A2%E5%8D%95%E8%AF%A6%E6%83%85%20%C2%B7%202026-10-19%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20x%3D%2226%22%20y%3D%2250%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E8%AE%A2%E5%8D%95%E7%BC%96%E5%8F%B7%20A-2024-001%20%E5%B7%B2%E5%8F%91%E8%B4%A7%3C%2Ftext%3E%3Ctext%20x%3D%2226%22%20y%3D%2298%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E6%94%B6%E4%BB%B6%E4%BA%BA%EF%BC%9A%E5%BC%A0%E4%BC%9F%E3%80%80%E8%81%94%E7%B3%BB%E7%94%B5%E8%AF%9D%20138****6621%3C%2Ftext%3E%3Ctext%20x%3D%2226%22%20y%3D%22146%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E5%9C%B0%E5%9D%80%EF%BC%9A%E6%9D%AD%E5%B7%9E%E5%B8%82%E4%BD%99%E6%9D%AD%E5%8C%BA%E6%96%87%E4%B8%80%E8%A5%BF%E8%B7%AF%20969%20%E5%8F%B7%3C%2Ftext%3E%3Ctext%20x%3D%2226%22%20y%3D%22194%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E5%95%86%E5%93%81%EF%BC%9A%E6%9C%BA%E6%A2%B0%E9%94%AE%E7%9B%98%20%C3%971%E3%80%80USB-C%20%E6%95%B0%E6%8D%AE%E7%BA%BF%20%C3%972%3C%2Ftext%3E%3Ctext%20x%3D%2226%22%20y%3D%22242%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E9%87%91%E9%A2%9D%EF%BC%9A%C2%A5%20328.00%EF%BC%88%E5%90%AB%E8%BF%90%E8%B4%B9%20%C2%A5%200.00%EF%BC%89%3C%2Ftext%3E%3Ctext%20x%3D%2226%22%20y%3D%22290%22%20font-family%3D%22Microsoft%20YaHei%2C%20sans-serif%22%20font-size%3D%2219%22%20fill%3D%22%231f2937%22%3E%E9%A2%84%E8%AE%A1%E9%80%81%E8%BE%BE%2010%20%E6%9C%88%2021%20%E6%97%A5%20%C2%B7%20%E9%A1%BA%E4%B8%B0%E9%80%9F%E8%BF%90%20SF1234567890%3C%2Ftext%3E%0A%20%20%3C%2Fsvg%3E","texts":["订单编号 A-2024-001 已发货","收件人：张伟　联系电话 138****6621","地址：杭州市余杭区文一西路 969 号","商品：机械键盘 ×1　USB-C 数据线 ×2","金额：¥ 328.00（含运费 ¥ 0.00）","预计送达 10 月 21 日 · 顺丰速运 SF1234567890"],"boxes":[[24,24,640,64],[24,72,640,112],[24,120,640,160],[24,168,640,208],[24,216,640,256],[24,264,640,304]],"scores":[0.99,0.98,0.97,0.96,0.95,0.93]}]};
+  var copied = null;
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* 忽略 */ }
+    document.body.removeChild(ta);
+  }
+
+  window.api = {
+    initialLanguage: 'zh',
+    getResult: function () { return Promise.resolve(SAMPLE); },
+    getSettings: function () { return Promise.resolve({ autoCloseAfterCopy: false }); },
+    setSettings: function () { return Promise.resolve({ ok: true }); },
+    copyText: function (text) {
+      copied = text;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
+      } else {
+        fallbackCopy(text);
+      }
+      return Promise.resolve();
+    },
+    // 演示模式不真的关窗，避免页面直接消失
+    closeResult: function () { return Promise.resolve(); },
+    openSettings: function () { return Promise.resolve(); },
+    onUpdate: function () {},
+    onLanguageChanged: function () {},
+    __copied: function () { return copied; }
+  };
+})();
+</script>
+<script>
+// 结果页逻辑：多屏分组展示 + 可编辑文字块 + 原图对照（双向联动）+ 复制交互
+const mainEl = document.getElementById('main')
+const statusEl = document.getElementById('status')
+const toggleBoxes = document.getElementById('toggle-boxes')
+const autoCloseEl = document.getElementById('auto-close')
+
+let screens = [] // [{ label, image, items: [{ text, box, score }] }]
+let hasResult = false // 是否有识别结果（用于语言切换后重绘空状态）
+
+// 临时提示的计时器：非空时抑制「已选 N 字」的实时计数，避免两者打架
+let flashTimer = null
+
+// —— 语言 ——
+let lang = I18n.normalizeLang(window.api.initialLanguage)
+function t(key, params) { return I18n.t(lang, key, params) }
+
+// 切换语言后就地重绘（静态文案 + 动态分组内容），无需刷新页面
+function applyLanguage(next) {
+  if (next) lang = I18n.normalizeLang(next)
+  I18n.applyDom(document, lang)
+  document.title = t('result.title')
+  // 复制反馈的"原文"是上一次语言的文案，切语言后必须丢弃，否则会恢复成旧语言
+  document.querySelectorAll('[data-idle-text]').forEach((el) => { delete el.dataset.idleText })
+  if (hasResult) renderAll()
+  else renderEmpty()
+  updateSelectionStatus() // 计数文案也要跟着语言切换
+}
+
+window.api.onLanguageChanged((payload) => {
+  if (payload && payload.lang) applyLanguage(payload.lang)
+})
+
+// 拖拽选字期间抑制悬停底色：否则鼠标扫过每一行都会亮一下，像高亮在追指针。
+// 必须绑在 document 上：拖到面板外松手时也要能清掉状态。
+let selecting = false
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return
+  selecting = true
+  document.body.classList.add('is-selecting')
+})
+function endSelecting() {
+  if (!selecting) return
+  selecting = false
+  document.body.classList.remove('is-selecting')
+}
+document.addEventListener('pointerup', endSelecting)
+document.addEventListener('pointercancel', endSelecting)
+
+// 临时提示：显示 1.5s 后自动让位给选中计数
+function flash(msg) {
+  if (flashTimer) clearTimeout(flashTimer)
+  statusEl.textContent = msg
+  statusEl.classList.remove('is-count')
+  flashTimer = setTimeout(() => {
+    flashTimer = null
+    updateSelectionStatus()
+  }, 1500)
+}
+
+// 选中字数（去掉首尾空白，避免只选中换行也计入）
+function getSelectionLength() {
+  const s = window.getSelection()
+  return s ? s.toString().trim().length : 0
+}
+
+// 实时反映「是否已选中文字」：状态条显示字数，复制选中按钮的可用态同步切换
+function updateSelectionStatus() {
+  if (flashTimer) return // 临时提示优先
+  const n = getSelectionLength()
+  const btn = document.getElementById('btn-copy-sel')
+  if (btn) btn.disabled = n === 0
+  if (n > 0) {
+    statusEl.textContent = t('result.selectedChars', { n })
+    statusEl.classList.add('is-count')
+  } else {
+    statusEl.textContent = ''
+    statusEl.classList.remove('is-count')
+  }
+}
+
+// 选区变化很频繁：合并到一帧内只处理一次。
+// 兜底定时器：窗口被遮挡/最小化时 Chromium 会暂停 rAF，状态不能永远停在旧值。
+let selRaf = 0
+let selTimer = 0
+function flushSelectionStatus() {
+  if (selRaf) { cancelAnimationFrame(selRaf); selRaf = 0 }
+  if (selTimer) { clearTimeout(selTimer); selTimer = 0 }
+  updateSelectionStatus()
+}
+document.addEventListener('selectionchange', () => {
+  if (selRaf || selTimer) return
+  selRaf = requestAnimationFrame(() => {
+    selRaf = 0
+    if (selTimer) { clearTimeout(selTimer); selTimer = 0 }
+    updateSelectionStatus()
+  })
+  selTimer = setTimeout(flushSelectionStatus, 120)
+})
+
+// 复制反馈：只换文案 + 加成功态，1.2s 后还原
+const feedbackTimers = new WeakMap()
+function buttonFeedback(btn, text) {
+  // 首次点击时锁定宽度：文案变短（"复制全文"→"已复制"）不会带着整条工具栏抖动
+  if (!btn.style.minWidth) btn.style.minWidth = btn.offsetWidth + 'px'
+  // 记住「非反馈态」的文案：连续点击时不会把"已复制"当成原文恢复
+  if (!btn.dataset.idleText) btn.dataset.idleText = btn.textContent
+  clearTimeout(feedbackTimers.get(btn))
+  btn.textContent = text
+  btn.classList.add('is-done')
+  feedbackTimers.set(btn, setTimeout(() => {
+    btn.textContent = btn.dataset.idleText
+    btn.classList.remove('is-done')
+  }, 1200))
+}
+
+// 空状态图标：纯装饰（无文字），不参与文案与 i18n
+const EMPTY_ICON = tag => (
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + tag + '</svg>'
+)
+const ICON_NO_TEXT = EMPTY_ICON(
+  '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>' +
+  '<path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>'
+)
+
+// 空状态：图标 + 文案；整页空状态额外带一行提示
+// 注意：.empty 的 textContent 必须恰好等于文案（i18n 测试按精确值断言）
+function createEmptyState(withHint) {
+  const empty = document.createElement('div')
+  empty.className = 'empty'
+
+  const icon = document.createElement('span')
+  icon.className = 'empty-icon'
+  icon.setAttribute('aria-hidden', 'true')
+  icon.innerHTML = ICON_NO_TEXT
+
+  const text = document.createElement('span')
+  text.className = 'empty-text'
+  text.textContent = t('result.empty')
+
+  empty.append(icon, text)
+  if (!withHint) return empty
+
+  const wrap = document.createElement('div')
+  wrap.className = 'empty-state'
+  const hint = document.createElement('p')
+  hint.className = 'empty-hint'
+  hint.textContent = t('result.emptyHint')
+  wrap.append(empty, hint)
+  return wrap
+}
+
+// 加载骨架：两栏结构与真实内容一致，数据到达时布局不跳
+function renderLoading() {
+  mainEl.innerHTML = ''
+  mainEl.classList.add('is-loading')
+  mainEl.setAttribute('aria-busy', 'true')
+
+  const sk = document.createElement('div')
+  sk.className = 'skeleton'
+  sk.setAttribute('aria-hidden', 'true')
+
+  const left = document.createElement('div')
+  left.className = 'skeleton-col'
+  ;[92, 76, 88, 64, 84, 70].forEach((w) => {
+    const line = document.createElement('div')
+    line.className = 'skeleton-line'
+    line.style.width = w + '%'
+    left.appendChild(line)
+  })
+
+  const right = document.createElement('div')
+  right.className = 'skeleton-col is-media'
+  const block = document.createElement('div')
+  block.className = 'skeleton-block'
+  right.appendChild(block)
+
+  sk.append(left, right)
+  mainEl.appendChild(sk)
+}
+
+function endLoading() {
+  mainEl.classList.remove('is-loading')
+  mainEl.setAttribute('aria-busy', 'false')
+}
+
+// 空状态（未识别到文字）
+function renderEmpty() {
+  endLoading()
+  mainEl.innerHTML = ''
+  mainEl.appendChild(createEmptyState(true))
+}
+
+// 核心：根据结果渲染（首次打开与连续截图刷新共用）
+// 兼容两种结构：{ screens:[{label,image,texts,boxes,scores}] } 或旧 { texts,boxes,scores,image }
+function render(result) {
+  const raw = result.screens || [{
+    label: result.label || '',
+    image: result.image,
+    texts: result.texts || [],
+    boxes: result.boxes,
+    scores: result.scores
+  }]
+
+  screens = raw.map((s) => {
+    const items = (s.texts || []).map((t, i) => ({
+      text: t,
+      box: s.boxes && s.boxes[i] ? s.boxes[i] : null,
+      score: s.scores && s.scores[i] != null ? s.scores[i] : null
+    }))
+    // 按坐标还原大致阅读顺序：先按 y（行），同行的按 x（列）
+    items.sort((a, b) => {
+      const ay = a.box ? a.box[1] : 0
+      const by = b.box ? b.box[1] : 0
+      const ax = a.box ? a.box[0] : 0
+      const bx = b.box ? b.box[0] : 0
+      if (Math.abs(ay - by) > 10) return ay - by
+      return ax - bx
+    })
+    return {
+      label: s.label || '',
+      labelKind: s.labelKind || '',
+      labelIndex: s.labelIndex || 0,
+      image: s.image,
+      items
+    }
+  })
+
+  hasResult = true
+  renderAll()
+}
+
+function renderAll() {
+  endLoading()
+  if (imgResizeObserver) imgResizeObserver.disconnect() // 旧面板已移除，解除监听
+  mainEl.innerHTML = ''
+  // 重绘后旧节点已不存在，联动记录一并作废
+  hoverLink = null
+  pinnedLink = null
+  // 仅多屏时显示标题（单屏无需区分来源）
+  const showTitle = screens.length > 1
+  screens.forEach((s, si) => renderScreen(s, si, showTitle))
+}
+
+// 窗口从宽改窄时按新宽度重算图片缩放：否则图片保持旧尺寸，出现横向溢出、识别框错位。
+// 只复用 drawBoxes 的既有布局逻辑，不改变任何数据与交互。
+// 回调推迟到下一帧：drawBoxes 会改图片尺寸，同步执行可能再次触发自身的 resize 通知。
+const imgResizeObserver = typeof ResizeObserver !== 'undefined'
+  ? new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const panel = entry.target
+      if (!panel._img || !panel._img.naturalWidth || panel._resizeRaf) continue
+      panel._resizeRaf = requestAnimationFrame(() => {
+        panel._resizeRaf = 0
+        drawBoxes(panel._img, panel._screen, panel._si)
+      })
+    }
+  })
+  : null
+
+// 按当前语言生成分组标题：优先用主进程给的 labelKind，避免把中文屏名写死进结果数据
+function screenTitle(s, si) {
+  switch (s.labelKind) {
+    case 'primary': return t('result.primaryScreen')
+    case 'secondary': return t('result.secondaryScreenN', { n: s.labelIndex || 1 })
+    case 'cross': return t('result.crossScreen')
+    case 'selection': return t('result.selectionLabel')
+    default: return s.label || t('result.screenN', { n: si + 1 })
+  }
+}
+
+// 渲染单屏分组：标题（多屏时）+ 左文字 + 右原图
+function renderScreen(s, si, showTitle) {
+  const group = document.createElement('div')
+  group.className = 'screen-group'
+
+  if (showTitle) {
+    const title = document.createElement('div')
+    title.className = 'screen-title'
+    title.textContent = screenTitle(s, si)
+    group.appendChild(title)
+  }
+
+  const body = document.createElement('div')
+  body.className = 'screen-body'
+
+  // 左：文字块
+  // 单一编辑根：整个面板只有一个 contentEditable，每行是它的块级子节点。
+  // 原因：Blink 会把拖选钳制在单个「编辑主机」内，逐行 contentEditable 会让跨行只选中首行。
+  const textPanel = document.createElement('div')
+  textPanel.className = 'text-panel'
+
+  const editor = document.createElement('div')
+  editor.className = 'editor'
+  editor.contentEditable = 'true'
+  editor.spellcheck = false
+  editor.dataset.screen = si
+
+  s.items.forEach((it, i) => {
+    const div = document.createElement('div')
+    div.className = 'item'
+    div.textContent = it.text
+    div.dataset.screen = si
+    div.dataset.index = i
+    if (it.score != null) div.title = t('result.confidence', { percent: Math.round(it.score * 100) })
+    div.addEventListener('click', () => focusBox(si, i))
+    editor.appendChild(div)
+  })
+
+  // 行数必须与识别框一一对应，否则「复制全文」会串行：按索引回写 items
+  editor.addEventListener('input', () => {
+    editor.querySelectorAll(':scope > .item').forEach((el, i) => {
+      if (s.items[i]) s.items[i].text = el.textContent
+    })
+  })
+
+  // 拦截回车：不允许拆出新块（1 行 = 1 个识别框）。行内不提供换行，
+  // 需要换行时应由 OCR 结果本身给出独立的行。
+  editor.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) e.preventDefault()
+  })
+
+  // 粘贴压平为单行，避免多行文本创建新块、破坏行与识别框的映射
+  editor.addEventListener('paste', (e) => {
+    e.preventDefault()
+    const raw = e.clipboardData ? e.clipboardData.getData('text/plain') : ''
+    document.execCommand('insertText', false, raw.replace(/\s*\n\s*/g, ' '))
+  })
+
+  if (s.items.length) {
+    textPanel.appendChild(editor)
+  } else {
+    // 单屏内空状态：只保留紧凑图标 + 文案，不重复整页提示
+    textPanel.appendChild(createEmptyState(false))
+  }
+  body.appendChild(textPanel)
+
+  // 右：原图 + 识别框
+  const imgPanel = document.createElement('div')
+  imgPanel.className = 'img-panel'
+  if (s.image) {
+    const wrap = document.createElement('div')
+    wrap.className = 'img-wrap'
+
+    const img = document.createElement('img')
+    img.draggable = false
+    img.alt = t('result.imageAlt')
+    img.onload = () => drawBoxes(img, s, si)
+    img.src = s.image
+
+    const boxLayer = document.createElement('div')
+    boxLayer.className = 'box-layer'
+    boxLayer.style.display = toggleBoxes.checked ? 'block' : 'none'
+
+    wrap.appendChild(img)
+    wrap.appendChild(boxLayer)
+    imgPanel.appendChild(wrap)
+    imgPanel._img = img
+    imgPanel._boxLayer = boxLayer
+    imgPanel._displayScale = 1
+    imgPanel._screen = s
+    imgPanel._si = si
+    if (imgResizeObserver) imgResizeObserver.observe(imgPanel)
+  } else {
+    // 边界：识别成功但没有截图（如纯文本结果）——占位而不是留一片空白
+    const placeholder = document.createElement('div')
+    placeholder.className = 'img-empty'
+    placeholder.textContent = t('result.noImage')
+    imgPanel.appendChild(placeholder)
+  }
+  body.appendChild(imgPanel)
+
+  group.appendChild(body)
+  mainEl.appendChild(group)
+}
+
+// 按物理坐标 + 缩放比画识别框（双索引联动）
+function drawBoxes(img, s, si) {
+  const imgPanel = img.parentElement.parentElement
+  const boxLayer = imgPanel._boxLayer
+  const nw = img.naturalWidth
+  const nh = img.naturalHeight
+  if (!nw || !nh) return
+  const maxW = Math.max(120, Math.min(imgPanel.clientWidth - 24, 640))
+  const displayScale = nw > maxW ? maxW / nw : 1
+  imgPanel._displayScale = displayScale
+  img.style.width = Math.round(nw * displayScale) + 'px'
+  img.style.height = Math.round(nh * displayScale) + 'px'
+
+  boxLayer.innerHTML = ''
+  s.items.forEach((it, i) => {
+    if (!it.box) return
+    const [x1, y1, x2, y2] = it.box
+    const d = document.createElement('div')
+    d.className = 'box'
+    d.dataset.screen = si
+    d.dataset.index = i
+    d.style.left = Math.round(x1 * displayScale) + 'px'
+    d.style.top = Math.round(y1 * displayScale) + 'px'
+    d.style.width = Math.max(1, Math.round((x2 - x1) * displayScale)) + 'px'
+    d.style.height = Math.max(1, Math.round((y2 - y1) * displayScale)) + 'px'
+    d.addEventListener('mouseenter', () => hoverBox(si, i))
+    d.addEventListener('mouseleave', () => unhoverBox(si, i))
+    d.addEventListener('click', () => focusText(si, i))
+    boxLayer.appendChild(d)
+  })
+}
+
+function clearActive() {
+  mainEl.querySelectorAll('.box.active').forEach((el) => el.classList.remove('active'))
+  mainEl.querySelectorAll('.item.active').forEach((el) => el.classList.remove('active'))
+}
+
+const itemEl = (si, i) => mainEl.querySelector('.item[data-screen="' + si + '"][data-index="' + i + '"]')
+const boxEl = (si, i) => mainEl.querySelector('.box[data-screen="' + si + '"][data-index="' + i + '"]')
+
+function highlightBox(si, i, scroll) {
+  const box = boxEl(si, i)
+  if (!box) return
+  box.classList.add('active')
+  if (scroll !== false) box.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+function highlightText(si, i, scroll) {
+  const item = itemEl(si, i)
+  if (!item) return
+  item.classList.add('active')
+  if (scroll !== false) item.scrollIntoView({ block: 'nearest' })
+}
+
+// 联动指向分两种：hover 是「临时指向」，点击才是「锁定」。
+// 悬停不滚动面板——鼠标扫过识别框时文字区自己滚动，比不提示更让人困惑。
+let hoverLink = null   // { si, i } 当前被悬停点亮
+let pinnedLink = null  // { si, i } 被点击锁定
+
+function hoverBox(si, i) {
+  if (pinnedLink && pinnedLink.si === si && pinnedLink.i === i) return
+  hoverLink = { si, i }
+  highlightText(si, i, false)
+}
+
+// 指针离开就撤掉：否则联动底色会一直留着，看起来像「已选中」
+function unhoverBox(si, i) {
+  if (!hoverLink || hoverLink.si !== si || hoverLink.i !== i) return
+  hoverLink = null
+  if (pinnedLink && pinnedLink.si === si && pinnedLink.i === i) return
+  const item = itemEl(si, i)
+  if (item) item.classList.remove('active')
+}
+
+// 点击文字块 → 定位原图框（双向高亮）
+function focusBox(si, i) {
+  clearActive()
+  pinnedLink = { si, i }
+  hoverLink = null
+  highlightText(si, i)
+  highlightBox(si, i)
+}
+
+// 点击原图框 → 定位文字块
+function focusText(si, i) {
+  clearActive()
+  pinnedLink = { si, i }
+  hoverLink = null
+  highlightBox(si, i)
+  highlightText(si, i)
+}
+
+// 显示/隐藏识别框（所有屏）
+toggleBoxes.addEventListener('change', () => {
+  mainEl.querySelectorAll('.box-layer').forEach((l) => {
+    l.style.display = toggleBoxes.checked ? 'block' : 'none'
+  })
+})
+
+// 打开设置窗口
+document.getElementById('btn-settings').addEventListener('click', () => {
+  window.api.openSettings()
+})
+
+// 复制后自动关闭：切换时回写设置，保持与设置页一致
+autoCloseEl.addEventListener('change', () => {
+  window.api.setSettings({ autoCloseAfterCopy: autoCloseEl.checked })
+})
+
+// 拼装全文：多屏之间用屏名分隔
+function getAllText() {
+  return screens
+    .map((s) => {
+      const body = s.items.map((it) => it.text).join('\n')
+      return s.label ? (s.label + '\n' + body) : body
+    })
+    .join('\n\n')
+}
+
+// —— 复制 ——
+async function doCopy(text, msg, btn) {
+  await window.api.copyText(text)
+  if (btn) buttonFeedback(btn, t('result.copied'))
+  if (autoCloseEl.checked) {
+    setTimeout(() => window.api.closeResult(), 400)
+  } else {
+    flash(msg)
+  }
+}
+
+function getSelectionText() {
+  const s = window.getSelection()
+  return s ? s.toString() : ''
+}
+
+// 全选：只选「识别文字」这一段，不含屏名、图区占位与工具栏。
+// 不能直接 selectNodeContents(mainEl)：选区从非编辑区跨进编辑根后，
+// Chromium 的 Selection.toString() 会返回空串，导致「复制选中」拿到空内容。
+function selectAll() {
+  const editors = mainEl.querySelectorAll('.editor')
+  const s = window.getSelection()
+  if (!s) return
+  s.removeAllRanges()
+  const withText = Array.prototype.filter.call(editors, (el) => el.textContent.length)
+  if (!withText.length) return
+
+  const first = withText[0]
+  const last = withText[withText.length - 1]
+  const range = document.createRange()
+  range.setStartBefore(first.firstChild)
+  range.setEndAfter(last.lastChild)
+  s.addRange(range)
+}
+
+document.getElementById('btn-copy-all').addEventListener('click', async () => {
+  await doCopy(getAllText(), t('result.copiedAll'), document.getElementById('btn-copy-all'))
+})
+
+document.getElementById('btn-copy-sel').addEventListener('click', async () => {
+  const text = getSelectionText()
+  if (!text) { flash(t('result.selectFirst')); return }
+  await doCopy(text, t('result.copiedSel'), document.getElementById('btn-copy-sel'))
+})
+
+// —— 选区浮条 ——
+// 选完文字后「复制」按钮在顶部工具栏，鼠标要跑一趟；浮条把动作放到指尖。
+// 只在鼠标松开（pointer 交互）后出现，程序化选区不会触发，避免干扰自动化测试与截图。
+const selPill = document.createElement('div')
+selPill.className = 'sel-pill'
+selPill.hidden = true
+
+const selPillBtn = document.createElement('button')
+selPillBtn.type = 'button'
+selPillBtn.className = 'btn'
+selPillBtn.dataset.i18n = 'result.copy'
+selPillBtn.dataset.act = 'copy'
+selPill.appendChild(selPillBtn)
+document.body.appendChild(selPill)
+
+// 选区必须落在结果内容区：在工具栏/图区拖出来的选区不该弹浮条
+function selectionRangeInMain() {
+  const s = window.getSelection()
+  if (!s || s.isCollapsed || !s.rangeCount) return null
+  const range = s.getRangeAt(0)
+  return mainEl.contains(range.commonAncestorContainer) ? range : null
+}
+
+function hideSelectionPill() {
+  if (!selPill.hidden) selPill.hidden = true
+}
+
+// 定位：默认贴选区末尾下方（不压住已选中的文字）；下方放不下再翻到上方，
+// 并夹在内容区内 —— 浮条不能盖住工具栏，也不该贴着窗口边缘。
+function placeSelectionPill(range) {
+  selPill.hidden = false
+  const rects = range.getClientRects()
+  const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+  if (!rect || (!rect.width && !rect.height)) { hideSelectionPill(); return }
+
+  const w = selPill.offsetWidth
+  const h = selPill.offsetHeight
+  const mainTop = mainEl.getBoundingClientRect().top + 4
+  const maxTop = window.innerHeight - h - 8
+
+  let top = rect.bottom + 8
+  if (top > maxTop) top = rect.top - h - 8
+  top = Math.max(mainTop, Math.min(top, maxTop))
+
+  let left = rect.left + rect.width / 2 - w / 2
+  left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
+  selPill.style.transform = 'translate(' + Math.round(left) + 'px, ' + Math.round(top) + 'px)'
+}
+
+// 拖选结束才出现；点击浮条自身时不要重新弹出
+document.addEventListener('mouseup', (e) => {
+  if (selPill.contains(e.target)) return
+  requestAnimationFrame(() => {
+    const range = selectionRangeInMain()
+    if (range) placeSelectionPill(range)
+    else hideSelectionPill()
+  })
+})
+
+// 选区塌陷 / 滚动 / 窗口尺寸变化 → 收起（贴不住就宁可消失）
+document.addEventListener('selectionchange', () => {
+  const s = window.getSelection()
+  if (!s || s.isCollapsed) hideSelectionPill()
+})
+mainEl.addEventListener('scroll', hideSelectionPill, true)
+window.addEventListener('resize', hideSelectionPill)
+document.addEventListener('pointerdown', (e) => {
+  if (!selPill.contains(e.target)) hideSelectionPill()
+})
+
+// mousedown 阻止默认行为：点浮条时不丢选区（否则复制到空字符串）
+selPill.addEventListener('mousedown', (e) => e.preventDefault())
+
+selPillBtn.addEventListener('click', async () => {
+  const text = getSelectionText()
+  hideSelectionPill()
+  if (!text) { flash(t('result.selectFirst')); return }
+  await doCopy(text, t('result.copiedSel'))
+})
+
+// 键盘快捷键：Ctrl/Cmd+C 复制、Ctrl/Cmd+A 全选、Esc 关闭
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey
+  if (mod && e.key.toLowerCase() === 'c') {
+    e.preventDefault()
+    const sel = getSelectionText()
+    if (sel) doCopy(sel, t('result.copiedSel'))
+    else doCopy(getAllText(), t('result.copiedAll'))
+  } else if (mod && e.key.toLowerCase() === 'a') {
+    e.preventDefault()
+    selectAll()
+  } else if (e.key === 'Escape') {
+    window.api.closeResult()
+  }
+})
+
+// 首次打开：拉取结果
+async function init() {
+  // 先按当前语言渲染静态文案，避免首屏出现占位空白；随后用骨架屏占住内容区
+  applyLanguage(window.api.initialLanguage)
+  renderLoading()
+
+  // 读取「复制后自动关闭」的默认值（设置页可改，结果页切换也会回写）
+  try {
+    const cfg = await window.api.getSettings()
+    if (cfg && cfg.autoCloseAfterCopy !== undefined) {
+      autoCloseEl.checked = cfg.autoCloseAfterCopy !== false
+    }
+  } catch (e) { /* 忽略：保持默认 checked */ }
+
+  let result = null
+  try {
+    result = await window.api.getResult()
+  } catch (e) {
+    result = null // 取结果失败：走空状态，不能让窗口停在骨架屏
+  }
+  if (!result || !(result.screens && result.screens.length) && !(result.texts && result.texts.length)) {
+    renderEmpty()
+    return
+  }
+  render(result)
+}
+
+// 连续截图：主进程推送新结果，直接刷新
+window.api.onUpdate((payload) => {
+  if (payload && ((payload.screens && payload.screens.length) || (payload.texts && payload.texts.length))) {
+    render(payload)
+  }
+})
+
+init()
+
+</script>
+</body>
+</html>
