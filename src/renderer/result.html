@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>识别结果</title>
+<style>
+  html, body { margin:0; height:100%; font:14px/1.7 -apple-system, "Microsoft YaHei", sans-serif; background:#fff; color:#222; overflow:hidden; }
+  .toolbar {
+    display:flex; align-items:center; gap:12px; padding:10px 16px;
+    border-bottom:1px solid #e5e5e5; background:#fff; flex:0 0 auto;
+  }
+  .toolbar button { padding:6px 14px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; font-size:13px; transition:background .15s, border-color .15s, color .15s; }
+  .toolbar button.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+  .toolbar button.done { background:#16a34a; color:#fff; border-color:#16a34a; }
+  .toolbar button.ghost { border-color:transparent; background:transparent; color:#64748b; padding:6px 10px; }
+  .toolbar button.ghost:hover { background:#f1f5f9; color:#1f2937; }
+  .toolbar label { font-size:13px; color:#444; cursor:pointer; user-select:none; }
+  #status { color:#666; font-size:12px; margin-left:auto; }
+
+  .main { height:calc(100% - 49px); overflow:auto; }
+
+  /* 每个屏一个分组 */
+  .screen-group { border-bottom:1px solid #e5e5e5; }
+  .screen-title {
+    padding:8px 16px; font-weight:600; font-size:13px; color:#1f2937;
+    background:#f3f4f6; border-bottom:1px solid #e5e5e5; position:sticky; top:0; z-index:2;
+  }
+  .screen-body { display:flex; min-height:120px; }
+  .text-panel { flex:1 1 50%; overflow:auto; padding:12px 16px; border-right:1px solid #e5e5e5; box-sizing:border-box; max-height:420px; }
+  .img-panel { flex:1 1 50%; overflow:auto; padding:12px; background:#f5f5f5; position:relative; box-sizing:border-box; }
+  .img-wrap { position:relative; display:inline-block; box-shadow:0 1px 6px rgba(0,0,0,0.15); background:#fff; }
+  .img-wrap img { display:block; }
+  .box-layer { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+  .box {
+    position:absolute; border:1.5px solid #3b82f6; background:rgba(59,130,246,0.10);
+    box-sizing:border-box; pointer-events:auto; cursor:pointer; transition:background .12s, border-color .12s;
+  }
+  .box:hover { background:rgba(239,68,68,0.18); border-color:#ef4444; }
+  .box.active { background:rgba(239,68,68,0.28); border-color:#ef4444; border-width:2px; }
+
+  .item { padding:2px 6px; border-radius:4px; cursor:pointer; outline:none; white-space:pre-wrap; }
+  .item:hover { background:#eef2ff; }
+  .item.active { background:#fde68a; }
+
+  .empty { color:#999; padding:12px 16px; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="btn-copy-all" class="primary">复制全文</button>
+    <button id="btn-copy-sel">复制选中</button>
+    <label><input type="checkbox" id="toggle-boxes" checked> 显示识别框</label>
+    <label title="复制后自动关闭结果窗口，便于直接粘贴到别处"><input type="checkbox" id="auto-close" checked> 复制后关闭</label>
+    <span id="status"></span>
+    <button id="btn-settings" class="ghost" title="打开设置">⚙ 设置</button>
+  </div>
+  <div class="main" id="main"></div>
+  <script src="result.js"></script>
+</body>
+</html>

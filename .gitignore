@@ -1,0 +1,24 @@
+node_modules/
+dist/
+out/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# Python 打包产物（onedir 结构 + onefile 旧版 + 临时调试输出）
+python/ocr_pkg/
+python/ocr_server.exe
+python/ocr_server_dist/
+python/ocr_server_dist2/
+python/ocr_server_dist3/
+python/ocr_dist/
+python/debug_dist/
+python/debug_rec_dist/
+python/build/
+build/
+
+# PyInstaller 中间文件与调试脚本
+*.spec
+debug_meta.py
+debug_rec.py

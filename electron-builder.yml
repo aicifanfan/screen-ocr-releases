@@ -1,0 +1,22 @@
+appId: com.example.screenocr
+productName: 截屏OCR
+directories:
+  output: dist
+files:
+  - src/**/*
+  - package.json
+extraResources:
+  - from: python/ocr_pkg/ocr_server
+    to: ocr_server
+publish:
+  provider: github
+  owner: aicifanfan
+  repo: screen-ocr-releases
+  releaseType: release
+win:
+  target:
+    - nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

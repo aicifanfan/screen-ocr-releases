@@ -1,0 +1,20 @@
+{
+  "name": "screen-ocr",
+  "version": "0.1.0",
+  "description": "截屏 OCR 工具：截取屏幕任意区域，本地识别文字并支持划选复制",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "build-py": "pyinstaller python/ocr_server.py --onedir --name ocr_server --distpath python/ocr_pkg --workpath build/pyi --noconfirm --collect-all rapidocr --collect-all onnxruntime"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}
