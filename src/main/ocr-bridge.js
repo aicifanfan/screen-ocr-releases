@@ -20,6 +20,7 @@ class OcrBridge {
     this.profile = profile || 'balanced' // fast / balanced / accurate
     this.pending = new Map() // seq -> { resolve, reject }
     this.seq = 0
+    this.onRefined = null // 两段式渐进：最终结果回调（msg => void）
     this._readyPromise = null
     this._readyResolve = null
     this._readyReject = null
@@ -108,6 +109,15 @@ class OcrBridge {
 
     // 档位切换回包：同样以引擎回报为准
     if (msg.type === 'profileChanged' && msg.profile) this.profile = msg.profile
+
+    // 两段式渐进的第二阶段：临时结果已经回过包（pending 里没有 seq），
+    // 这里走独立回调把「最终结果」推给上层，不能当成未知消息丢掉。
+    if (msg.type === 'refined') {
+      if (typeof this.onRefined === 'function') {
+        try { this.onRefined(msg) } catch (e) { /* 回调异常不影响后续请求 */ }
+      }
+      return
+    }
 
     const seq = msg.seq
     if (seq != null && this.pending.has(seq)) {

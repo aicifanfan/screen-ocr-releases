@@ -1,12 +1,12 @@
 {
   "name": "screen-ocr",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "截屏 OCR 工具：截取屏幕任意区域，本地识别文字并支持划选复制",
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "test": "node tests/test_i18n.js && node tests/test_i18n_scan.js && node tests/test_crop_math.js",
+    "test": "node tests/test_i18n.js && node tests/test_i18n_scan.js && node tests/test_crop_math.js && node tests/test_progressive.js",
     "test:ui": "electron tests/test_result_ui.js && electron tests/test_i18n_ui.js && electron tests/test_settings.js",
     "demo:html": "node scripts/build-demo.js",
     "build-py": "node scripts/build-py.js",

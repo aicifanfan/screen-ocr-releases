@@ -58,9 +58,11 @@ app.whenReady().then(async () => {
   })()`)
 
   const texts = ['Hello World', '第二行文本', 'Invoice No. A-2024-001']
-  ipcMain.handle('result:get', () => ({
+  const baseResult = {
     screens: [{ label: '', image, texts, boxes: [[0, 0, 300, 100], [0, 100, 300, 200], [300, 0, 600, 100]], scores: [0.99, 0.98, 0.97] }]
-  }))
+  }
+  let resultPayload = baseResult
+  ipcMain.handle('result:get', () => resultPayload)
   ipcMain.handle('settings:get', () => ({ autoCloseAfterCopy: false }))
   ipcMain.handle('clipboard:copy', async () => {})
 
@@ -332,6 +334,77 @@ app.whenReady().then(async () => {
   check('结果推送后替换骨架并渲染', afterUpdate.items === 1 && afterUpdate.skeleton === false,
     'items=' + afterUpdate.items)
   check('坏图回退为占位（不出现破图）', afterUpdate.imgPlaceholder.length > 0, afterUpdate.imgPlaceholder)
+
+  // —— 12. 两段式渐进：临时结果 + 精修提示 + 换手（含「正在选字时延后替换」） ——
+  resultPayload = {
+    provisional: true,
+    refined: false,
+    screens: [{
+      seq: 9001,
+      stage: 'provisional',
+      label: '',
+      image,
+      texts: ['临时第一行', '临时第二行'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.9, 0.9]
+    }]
+  }
+  // 前面的「识别中」用例把 result:get 改成了 {pending:true}，这里换回真实数据源
+  ipcMain.removeHandler('result:get')
+  ipcMain.handle('result:get', () => resultPayload)
+  const winProg = new BrowserWindow({
+    show: false, width: 900, height: 640,
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=zh'] }
+  })
+  await winProg.loadFile(RESULT)
+  await waitFor(winProg, `document.querySelectorAll('.item').length === 2`)
+
+  const provState = await winProg.webContents.executeJavaScript(`({
+    items: document.querySelectorAll('.item').length,
+    chipHidden: document.getElementById('refining').hidden,
+    chipText: document.getElementById('refining').textContent.trim(),
+    first: (document.querySelectorAll('.item')[0] || {}).textContent
+  })`)
+  check('渐进：临时结果先上屏', provState.items === 2 && provState.first === '临时第一行', provState.first)
+  check('渐进：显示「精修中…」提示', provState.chipHidden === false && provState.chipText.length > 0, provState.chipText)
+
+  // 用户正在选中文字：此时推送精修结果应被推迟，避免文字在光标下跳变
+  await winProg.webContents.executeJavaScript(`(function(){
+    const item = document.querySelectorAll('.item')[0];
+    const r = document.createRange(); r.selectNodeContents(item);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    return true;
+  })()`)
+  await sleep(150)
+  const refinedPayload = {
+    provisional: false,
+    refined: true,
+    screens: [{
+      seq: 9001,
+      label: '',
+      image,
+      texts: ['最终第一行', '临时第二行'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.99, 0.9]
+    }]
+  }
+  await winProg.webContents.send('result:update', refinedPayload)
+  await sleep(320)
+  const whileSelecting = await winProg.webContents.executeJavaScript(
+    `(document.querySelectorAll('.item')[0] || {}).textContent`)
+  check('渐进：选中中推送精修 → 暂不替换（文字不跳）', whileSelecting === '临时第一行', whileSelecting)
+
+  // 收起选区 → 立刻换上最终结果，提示消失
+  await winProg.webContents.executeJavaScript(`(function(){ window.getSelection().removeAllRanges(); return true })()`)
+  await waitFor(winProg, `(document.querySelectorAll('.item')[0] || {}).textContent === '最终第一行'`, 2000)
+  const afterRefine = await winProg.webContents.executeJavaScript(`({
+    first: (document.querySelectorAll('.item')[0] || {}).textContent,
+    chipHidden: document.getElementById('refining').hidden,
+    items: document.querySelectorAll('.item').length
+  })`)
+  check('渐进：选区收起后换上最终结果', afterRefine.first === '最终第一行', afterRefine.first)
+  check('渐进：精修完成后隐藏提示', afterRefine.chipHidden === true)
+  check('渐进：替换后行数不变（不丢行）', afterRefine.items === 2, 'items=' + afterRefine.items)
 
   console.log(pass ? '[ALL PASS] 结果页视觉与交互验证通过' : '[FAIL] 存在未通过项')
   if (!pass) process.exitCode = 1

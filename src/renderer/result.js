@@ -1,11 +1,17 @@
 // 结果页逻辑：多屏分组展示 + 可编辑文字块 + 原图对照（双向联动）+ 复制交互
 const mainEl = document.getElementById('main')
 const statusEl = document.getElementById('status')
+const refiningEl = document.getElementById('refining')
 const toggleBoxes = document.getElementById('toggle-boxes')
 const autoCloseEl = document.getElementById('auto-close')
 
 let screens = [] // [{ label, image, items: [{ text, box, score }] }]
 let hasResult = false // 是否有识别结果（用于语言切换后重绘空状态）
+
+// 两段式渐进：临时结果已上屏、最终结果还没来
+let refining = false
+let deferredPayload = null // 用户正在选字时先攒着，等选区收起再替换
+let deferredTimer = 0
 
 // 临时提示的计时器：非空时抑制「已选 N 字」的实时计数，避免两者打架
 let flashTimer = null
@@ -187,8 +193,10 @@ function endLoading() {
 // 空状态（未识别到文字）
 function renderEmpty() {
   endLoading()
+  refining = false // 没有内容时不该挂「精修中」
   mainEl.innerHTML = ''
   mainEl.appendChild(createEmptyState(true))
+  updateRefiningChip()
 }
 
 // 核心：根据结果渲染（首次打开与连续截图刷新共用）
@@ -238,11 +246,17 @@ function render(result) {
   })
 
   hasResult = true
+  // 两段式渐进：临时结果（provisional）先上屏，并挂「精修中…」提示
+  refining = result.provisional === true
   renderAll()
 }
 
 function renderAll() {
   endLoading()
+  // 精修替换会重建 DOM：先记住两个面板的滚动位置，重建后还原，
+  // 否则用户正在看的段落会被顶回顶部。
+  const prevScroll = Array.from(mainEl.querySelectorAll('.text-panel, .img-panel'))
+    .map((el) => el.scrollTop)
   if (imgResizeObserver) imgResizeObserver.disconnect() // 旧面板已移除，解除监听
   mainEl.innerHTML = ''
   // 重绘后旧节点已不存在，联动记录一并作废
@@ -251,6 +265,21 @@ function renderAll() {
   // 仅多屏时显示标题（单屏无需区分来源）
   const showTitle = screens.length > 1
   screens.forEach((s, si) => renderScreen(s, si, showTitle))
+
+  if (prevScroll.length) {
+    const panels = mainEl.querySelectorAll('.text-panel, .img-panel')
+    panels.forEach((el, i) => {
+      if (i < prevScroll.length && prevScroll[i]) el.scrollTop = prevScroll[i]
+    })
+  }
+  updateRefiningChip()
+}
+
+// 「精修中…」提示：只在两段式渐进的第一段上屏后显示
+function updateRefiningChip() {
+  if (!refiningEl) return
+  refiningEl.hidden = !refining
+  if (refining) refiningEl.textContent = t('result.refining')
 }
 
 // 窗口从宽改窄时按新宽度重算图片缩放：否则图片保持旧尺寸，出现横向溢出、识别框错位。
@@ -627,7 +656,11 @@ document.addEventListener('mouseup', (e) => {
 // 选区塌陷 / 滚动 / 窗口尺寸变化 → 收起（贴不住就宁可消失）
 document.addEventListener('selectionchange', () => {
   const s = window.getSelection()
-  if (!s || s.isCollapsed) hideSelectionPill()
+  if (!s || s.isCollapsed) {
+    hideSelectionPill()
+    // 之前因为「正在选字」而推迟的精修结果，选区收起后立刻换上
+    if (deferredPayload) applyDeferred()
+  }
 })
 mainEl.addEventListener('scroll', hideSelectionPill, true)
 window.addEventListener('resize', hideSelectionPill)
@@ -693,11 +726,40 @@ async function init() {
   render(result)
 }
 
-// 连续截图：主进程推送新结果，直接刷新
+// 连续截图 / 精修完成：主进程推送新结果，直接刷新
 window.api.onUpdate((payload) => {
-  if (payload && ((payload.screens && payload.screens.length) || (payload.texts && payload.texts.length))) {
-    render(payload)
-  }
+  if (!payload || !((payload.screens && payload.screens.length) || (payload.texts && payload.texts.length))) return
+  if (shouldDefer(payload)) { deferSwap(payload); return }
+  render(payload)
 })
+
+// 精修结果到达时：如果用户正在拖选/已选中文字，先不换，否则文字会在光标下跳变
+function hasLiveSelection() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return false
+  const node = sel.anchorNode
+  return !!node && mainEl.contains(node)
+}
+
+function shouldDefer(payload) {
+  // 只有「精修完成」的整段替换需要让路；换语言、连续截图更新等照常刷新
+  return refining && payload.refined === true && hasLiveSelection()
+}
+
+function deferSwap(payload) {
+  deferredPayload = payload
+  clearTimeout(deferredTimer)
+  // 兜底：用户长时间不松手也不能永远停在临时结果
+  deferredTimer = setTimeout(applyDeferred, 20000)
+}
+
+function applyDeferred() {
+  clearTimeout(deferredTimer)
+  deferredTimer = 0
+  if (!deferredPayload) return
+  const payload = deferredPayload
+  deferredPayload = null
+  render(payload)
+}
 
 init()

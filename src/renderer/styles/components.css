@@ -142,6 +142,27 @@
   font-weight: 500;
 }
 
+/* 精修中：两段式渐进的第一段已上屏，medium 还在后台重算。
+   用一个小圆点呼吸表示「还在动」，不抢工具栏注意力；reduced-motion 下自动静止。 */
+.pill-refining {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+  gap: 6px;
+}
+.pill-refining::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+  animation: pill-breathe 1.1s ease-in-out infinite;
+}
+@keyframes pill-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 /* ------------------------------------------------------------
    卡片：设置页等纵向表单的容器
    ------------------------------------------------------------ */

@@ -167,6 +167,50 @@ let resultWin = null  // 结果窗口
 let settingsWin = null // 设置窗口
 let tray = null
 let resultData = null // 最近一次识别结果
+const pendingRefined = new Map() // seq -> 精修结果（show:result 还没到就先存着）
+
+// 两段式渐进：把最终结果合并进最近一次结果，并推给结果窗口。
+// 只替换 texts/scores（检测框不变），保持行数一致，避免用户选中位置错乱。
+function applyRefined(payload, msg) {
+  if (!payload || !Array.isArray(payload.screens) || !msg) return false
+  const screens = payload.screens
+  let idx = screens.findIndex((s) => s && s.seq != null && s.seq === msg.seq)
+  if (idx < 0) idx = screens.length === 1 ? 0 : -1 // 单屏场景兜底
+  if (idx < 0) return false
+
+  const s = screens[idx]
+  if (Array.isArray(msg.texts) && msg.texts.length === (s.texts || []).length) {
+    s.texts = msg.texts
+    if (Array.isArray(msg.scores)) s.scores = msg.scores
+  } else if (Array.isArray(msg.texts) && msg.texts.length) {
+    // 行数变了（理论上不会，检测没重跑）：整体替换，宁可牺牲选中位置也不显示旧文本
+    s.texts = msg.texts
+    if (Array.isArray(msg.scores)) s.scores = msg.scores
+  }
+  payload.refined = true
+  payload.provisional = false
+  payload.refinedLines = msg.refined === false ? 0 : (msg.lines || 0)
+  return true
+}
+
+// 精修结果由 sidecar 异步推送：更新缓存并刷新窗口
+ocr.onRefined = (msg) => {
+  if (!msg || msg.seq == null) return
+  if (!resultData) {
+    pendingRefined.set(msg.seq, msg)
+    return
+  }
+  const ok = applyRefined(resultData, msg)
+  if (!ok) {
+    pendingRefined.set(msg.seq, msg)
+    return
+  }
+  log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
+    'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
+  if (resultWin && !resultWin.isDestroyed() && resultWinReady) {
+    resultWin.webContents.send('result:update', resultData)
+  }
+}
 // OCR 档位来自配置（默认 balanced：实测比默认参数快 9.4x，CER 从 9.09% 降到 2.16%）
 let ocrProfile = 'balanced'
 try { ocrProfile = getAll().ocrProfile || 'balanced' } catch { /* 配置不可读用默认 */ }
@@ -535,8 +579,19 @@ ipcMain.handle('show:result', (_e, payload) => {
     log.warn('show:result 收到空结果，忽略')
     return { ok: false, reason: 'EMPTY' }
   }
+  // 两段式渐进：临时结果先上屏，最终结果稍后由 result:refined 推过来
+  const first = payload.screens[0] || {}
+  payload.provisional = first.stage === 'provisional'
+  payload.refined = !payload.provisional
   resultData = payload
   resultPending = false
+
+  // 精修结果比 show:result 先到（极少数时序）：这里补上，避免永远停在「精修中」
+  const early = pendingRefined.get(first.seq)
+  if (early) {
+    pendingRefined.delete(first.seq)
+    applyRefined(payload, early)
+  }
 
   if (resultWin && !resultWin.isDestroyed()) {
     // 预加载窗口：直接推数据（页面可能还在加载，加载完会自己 getResult 再渲染）

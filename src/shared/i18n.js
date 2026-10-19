@@ -118,6 +118,7 @@
       // 结果页
       'result.copyAll': '复制全文',
       'result.copySel': '复制选中',
+      'result.refining': '精修中…',
       'result.showBoxes': '显示识别框',
       'result.autoClose': '复制后关闭',
       'result.autoCloseTitle': '复制后自动关闭结果窗口，便于直接粘贴到别处',
@@ -234,6 +235,7 @@
 
       'result.copyAll': 'Copy all',
       'result.copySel': 'Copy selection',
+      'result.refining': 'Refining…',
       'result.showBoxes': 'Show boxes',
       'result.autoClose': 'Close after copy',
       'result.autoCloseTitle': 'Close the result window after copying so you can paste elsewhere',

@@ -49,11 +49,12 @@ for _stream in (sys.stdout, sys.stderr):
 #   4) rec_batch_num 6→12 —— 减少小图块的调度开销。
 #   5) accurate 档 det 改用 small：检测只决定「框在哪、几行」，文字仍由 medium rec 识别；
 #      det medium 在 960 封顶下固定吃 2.7s，换 small 只要 0.5s，精度几乎无损（见 docs/优化方向筛选与推进建议.md）。
-#   6) accurate 档默认走「级联识别」（cascade）：先用 small 识别全部行，只有置信度低的行
-#      再用 medium 重跑。medium rec 的成本是 small 的约 37 倍/行，而绝大多数行 small 就能读对，
-#      因此整体时间从「全部 medium」降到「small 全量 + 少数行 medium」，精度接近纯 medium。
-#      实测：small 的错误是高置信的（0.90 阈值几乎不触发重跑），CER 只从 4.62% 降到 4.62%，
-#      **默认关闭**，保留为实验开关（SCREEN_OCR_CASCADE=1 打开）。
+#   6) accurate 档支持「级联识别」（cascade，默认关闭）：先用 small 识别全部行，只有置信度低的行
+#      再用 medium 重跑。实测 small 的错误是高置信的（0.90 阈值几乎不触发重跑），
+#      CER 只从 4.62% 降到 4.62%，所以默认关闭，保留为实验开关（SCREEN_OCR_CASCADE=1）。
+#   7) accurate 档默认走「两段式渐进」（progressive）：先用 small 全量出一版**临时结果**立即返回，
+#      再用 medium 对全部行重跑并推送最终结果。用户 0.5~1s 就能看到文字，最终精度与纯 medium 相同
+#      （因为最终结果就是 medium 算的）。SCREEN_OCR_PROGRESSIVE=0 可退回「一次算完再返回」。
 PROFILES = ("fast", "balanced", "accurate")
 
 # 允许环境变量覆盖，便于同机 A/B 与出问题回退（不设即用下面的默认值）
@@ -63,6 +64,7 @@ ENV_REC_TYPE = "SCREEN_OCR_REC_TYPE"
 ENV_CASCADE = "SCREEN_OCR_CASCADE"
 ENV_CASCADE_THRESH = "SCREEN_OCR_CASCADE_THRESH"
 ENV_CASCADE_MAXRATIO = "SCREEN_OCR_CASCADE_MAXRATIO"
+ENV_PROGRESSIVE = "SCREEN_OCR_PROGRESSIVE"
 
 DEFAULT_CASCADE_THRESH = 0.90   # 低于此分数的行用 medium 重跑
 DEFAULT_CASCADE_MAXRATIO = 0.5  # 最多重跑一半的行（超过说明整图都不可信，重跑不划算）
@@ -72,6 +74,13 @@ def _cascade_on(profile):
     if profile != "accurate":
         return False
     return (os.environ.get(ENV_CASCADE) or "0").strip() not in ("0", "false", "off", "")
+
+
+def _progressive_on(profile):
+    """两段式渐进：只对 accurate 生效；与 cascade 互斥（cascade 是实验开关）。"""
+    if profile != "accurate" or _cascade_on(profile):
+        return False
+    return (os.environ.get(ENV_PROGRESSIVE) or "1").strip() not in ("0", "false", "off")
 
 
 def _cascade_thresh():
@@ -131,8 +140,9 @@ def build_params(profile):
     elif profile == "accurate":
         params.update({
             "Det.model_type": _model_type("small"),
-            # 级联模式下主引擎先用 small 全量识别，低置信行再交给 medium 重跑
-            "Rec.model_type": _model_type("small" if _cascade_on(profile) else "medium"),
+            # 渐进模式下主引擎先用 small 全量出一版临时结果，低延迟；最终结果由 medium 单独重跑
+            "Rec.model_type": _model_type(
+                "small" if (_cascade_on(profile) or _progressive_on(profile)) else "medium"),
         })
 
     # 环境变量可覆盖任意档位的模型选择，用于同机 A/B（生产默认值不受影响）
@@ -223,19 +233,13 @@ def parse_output(res):
     return texts, boxes, scores, quads
 
 
-def refine_low_confidence(arr, texts, scores, quads, precise_rec):
-    """级联识别第二步：把置信度低的行用 medium 模型重跑。
+def recompute_lines(arr, texts, scores, quads, precise_rec, indices):
+    """用更准的 rec 重跑指定行，就地写回 texts/scores。
 
-    只在 accurate 档启用。返回 (重跑行数, 用掉的毫秒)。
-    任何异常都退化为「保持 small 的结果」，不影响识别可用性。
+    返回 (成功替换行数, 耗时毫秒)。任何异常都退化为「保持原结果」，不影响可用性。
     """
-    if not quads or not texts:
-        return 0, 0.0
-
-    thresh = _cascade_thresh()
-    max_n = max(1, int(round(len(texts) * _cascade_maxratio())))
-    low = [i for i, s in enumerate(scores) if s < thresh and quads[i] is not None][:max_n]
-    if not low:
+    indices = [i for i in indices if 0 <= i < len(texts) and quads[i] is not None]
+    if not indices:
         return 0, 0.0
 
     try:
@@ -243,30 +247,41 @@ def refine_low_confidence(arr, texts, scores, quads, precise_rec):
         from rapidocr.ch_ppocr_rec.typings import TextRecInput
 
         t0 = time.perf_counter()
-        crops = []
-        for i in low:
+        crops, used_idx = [], []
+        for i in indices:
             crop = get_rotate_crop_image(arr, np.array(quads[i], dtype=np.float32))
             if crop is None or crop.size == 0:
                 continue
             crops.append(crop)
+            used_idx.append(i)
         if not crops:
             return 0, 0.0
 
         out = precise_rec(TextRecInput(img=crops))
         new_txts = list(getattr(out, "txts", []) or [])
         new_scores = list(getattr(out, "scores", []) or [])
-        used = 0
-        for k, i in enumerate(low[:len(new_txts)]):
+        n = 0
+        for k, i in enumerate(used_idx[:len(new_txts)]):
             t = str(new_txts[k] or "").strip()
             if not t:
-                continue  # 重跑出空串：宁可保留 small 的结果
+                continue  # 重跑出空串：宁可保留原结果
             texts[i] = new_txts[k]
             if k < len(new_scores):
                 scores[i] = float(new_scores[k])
-            used += 1
-        return used, round((time.perf_counter() - t0) * 1000, 1)
+            n += 1
+        return n, round((time.perf_counter() - t0) * 1000, 1)
     except Exception:  # noqa: BLE001
         return 0, 0.0
+
+
+def refine_low_confidence(arr, texts, scores, quads, precise_rec):
+    """级联识别第二步：只把置信度低的行用 medium 重跑。"""
+    if not texts:
+        return 0, 0.0
+    thresh = _cascade_thresh()
+    max_n = max(1, int(round(len(texts) * _cascade_maxratio())))
+    low = [i for i, s in enumerate(scores) if s < thresh][:max_n]
+    return recompute_lines(arr, texts, scores, quads, precise_rec, low)
 
 
 # —— 符号规范化（保守）：只做确定性替换，不误伤 ×、x 等真实字符 ——
@@ -357,8 +372,14 @@ def main():
 
     init_ms = (time.perf_counter() - t0) * 1000
     warm_ms = warmup(engine)
+    if _progressive_on(profile):
+        try:
+            get_precise()  # 预热 medium rec，避免第一次截图多等 1s
+        except Exception:  # noqa: BLE001
+            pass
     _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
-           "warmup_ms": warm_ms, "threads": _threads(), "cascade": _cascade_on(profile)})
+           "warmup_ms": warm_ms, "threads": _threads(),
+           "cascade": _cascade_on(profile), "progressive": _progressive_on(profile)})
 
     for line in sys.stdin:
         line = line.strip()
@@ -394,12 +415,18 @@ def main():
                 arr = np.array(img)
                 res = engine(arr)
                 texts, boxes, scores, quads = parse_output(res)
-                # 级联：低置信行用 medium 重跑（只有 accurate 档会进来）
+                progressive = _progressive_on(profile)
+
+                # 级联（实验开关）：低置信行用 medium 重跑，然后一次性返回
                 reran, refine_ms = 0, 0.0
                 if _cascade_on(profile):
                     reran, refine_ms = refine_low_confidence(arr, texts, scores, quads, get_precise())
+
                 # 识别结果符号规范化（星号变体/全角标点 → 半角 + 中文间空格清理）
                 texts = [postprocess_text(t) for t in texts]
+
+                # 两段式：先把 small 的结果作为临时结果立刻返回（stage=provisional），
+                # 再去算最终结果并用 refined 消息推送过来。
                 _emit({
                     "type": "result",
                     "seq": seq,
@@ -407,9 +434,31 @@ def main():
                     "boxes": boxes,
                     "scores": scores,
                     "profile": profile,
+                    "stage": "provisional" if progressive else "final",
                     "cascade": {"reran": reran, "refine_ms": refine_ms} if _cascade_on(profile) else None,
                     "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
                 })
+
+                if progressive:
+                    final_texts = list(texts)
+                    final_scores = list(scores)
+                    refined_n, refined_ms = 0, 0.0
+                    if quads and final_texts:
+                        refined_n, refined_ms = recompute_lines(
+                            arr, final_texts, final_scores, quads, get_precise(),
+                            range(len(final_texts)))
+                        final_texts = [postprocess_text(t) for t in final_texts]
+                    _emit({
+                        "type": "refined",
+                        "seq": seq,
+                        "texts": final_texts,
+                        "scores": final_scores,
+                        "profile": profile,
+                        "refined": refined_n > 0,
+                        "lines": len(final_texts),
+                        "refine_ms": refined_ms,
+                        "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
+                    })
             except Exception as exc:  # noqa: BLE001
                 _emit({"type": "error", "seq": seq, "message": str(exc)})
 
