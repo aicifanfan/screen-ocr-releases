@@ -17,7 +17,7 @@ derived_from: process/2026-10-19_process.log.md
 ## §0 一句话状态
 
 **设计稿已完整落地**：样式拆为 tokens/base/components/page 四层，结果页具备悬停/联动/选中/拖拽/禁用/加载/空状态/无原图八种状态与选区浮条，
-设置页接入同一套令牌与组件；`test_result_ui.js` **39 项**、`test_i18n_ui.js`、`test_settings.js`、i18n 静态扫描全 PASS。
+设置页接入同一套令牌与组件；`tests/test_result_ui.js` **39 项**、`tests/test_i18n_ui.js`、`tests/test_settings.js`、i18n 静态扫描全 PASS。
 
 ## §1 关键结论
 
@@ -38,14 +38,14 @@ derived_from: process/2026-10-19_process.log.md
 | **D1** | 文字面板改为单编辑容器 `.editor[contenteditable] > .item*` | 唯一能让原生跨行拖选生效的结构 | ①保持多编辑主机（等于放弃跨行选）②默认只读、双击才进单行编辑（交互成本更高） | `K1/K2` |
 | **D2** | 守住「1 行 = 1 识别框」不变量：`Enter` 必须 `preventDefault`，粘贴把换行压平 | `getAllText()` 依赖 `items` 顺序，行数错位会串行 | 允许自由编辑、复制时按 DOM 重建 items（改动面更大） | `S2:292-299` |
 | **D3** | 不引入 mark.js / web-highlighter 等高亮库 | 二者均拆分包裹文本节点，破坏编辑与选区映射 | — | `R1` |
-| **D4** | `--sel-bg` 保持字面 hex，不改 `color-mix()` | `test_result_ui.js` 用 `parseInt(hex)` 解析变量值，函数式颜色会让测试崩 | 用 `color-mix` 让选区色跟随主色 | `S3:70` |
+| **D4** | `--sel-bg` 保持字面 hex，不改 `color-mix()` | `tests/test_result_ui.js` 用 `parseInt(hex)` 解析变量值，函数式颜色会让测试崩 | 用 `color-mix` 让选区色跟随主色 | `S3:70` |
 | **D5** | 空状态文字 `#94a3b8` → `#64748b` | 2.56:1 → 4.76:1，13px 小字必须过 AA | — | `K3` |
 | **D6** | 拖拽态用 `body.is-selecting`，`pointerdown` 绑 `document` | 绑 `.item` 会在拖到面板外松开时漏掉 `pointerup` | 用 `mousedown`（触摸笔设备失效） | `P-04` |
 | **D7** | 识别框默认去掉 6% 填充，只留描边 | 半透明蓝会压住原图，对照阅读发灰 | 保留填充、提高描边对比 | `S1:181-189` |
 | **D8** | 选区浮条「可选」，若做则手写约 40 行 | 项目无打包器，为 1 个气泡引 floating-ui 不划算 | 引入 `@floating-ui/dom` | `R1` |
 | **D9** | 样式拆四层：`tokens`（令牌）/ `base`（reset+选区+滚动条）/ `components`（按钮/胶囊/卡片/开关/空状态/骨架/浮条）/ 页面样式 | 组件复用 + 命名规范；外链不影响 CSSOM 测试（K6） | 继续把全部样式塞进各 HTML 的 `<style>` | `K6`、`P-11` |
 | **D10** | 加载态用**两栏骨架**而非 spinner | 结构与真实内容同形，数据到达不跳布局；spinner 会闪一下 | 居中转圈 / 纯文本"加载中" | `P-11` |
-| **D11** | 空状态加图标与提示，但 `.empty` 的 `textContent` 保持**精确等于**原文案 | `test_i18n_ui.js` 用精确值断言空状态文案 | 把提示写进 `.empty` | `S3`、`P-11` |
+| **D11** | 空状态加图标与提示，但 `.empty` 的 `textContent` 保持**精确等于**原文案 | `tests/test_i18n_ui.js` 用精确值断言空状态文案 | 把提示写进 `.empty` | `S3`、`P-11` |
 | **D12** | 浮条默认贴选区**下方**，放不下才翻上方，并夹在内容区内 | 盖住"接下来要读的行"比盖住已选中的行影响小；不遮工具栏 | 固定上方（会压住选中行或工具栏） | `P-11` |
 
 ## §3 未完成事项（按优先级）
@@ -55,7 +55,7 @@ derived_from: process/2026-10-19_process.log.md
 | **T1** | **P0** 单容器重构 + 编辑同步（Enter/粘贴约束） | **已完成（P-09）** | 无 | `result.js` ≈45 行、`result.html` ≈6 行 | 真实拖选可跨 3 行；回归全 PASS |
 | **T2** | **P1** 拖拽态抑制 hover / 非文本区 `user-select:none` / `.empty` 对比度 | **已完成** | T1 | `result.html`、`result.js` | 拖拽中无 hover 底色；空状态 ≥4.5:1 |
 | **T3** | **P2** 复制反馈锁宽 + 软成功态 / 识别框去填充 / `#status` 最小宽 | **已完成** | T1（实际未阻塞） | `result.html` + `result.js` | 复制后宽度变化 ≤1px；右侧按钮不位移 |
-| **T4** | 补测试：单编辑根数量、行节点结构、`user-select`、按钮宽度稳定 | **已完成 4/4**（P-11 补上宽度与状态断言，25→39 项） | T1–T3 | `test_result_ui.js` | 新增断言全 PASS |
+| **T4** | 补测试：单编辑根数量、行节点结构、`user-select`、按钮宽度稳定 | **已完成 4/4**（P-11 补上宽度与状态断言，25→39 项） | T1–T3 | `tests/test_result_ui.js` | 新增断言全 PASS |
 | **T5** | 选区浮条 | **已完成（P-11）** | T1 | `result.js` ≈70 行 + `components.css` | 不遮工具栏、边界翻转、滚动/塌陷即收 |
 | **T6** | 响应式：窗口变窄后图片重算缩放 | **已完成**（ResizeObserver） | — | `result.js` ≈12 行 | 各宽度无横向溢出、识别框不错位 |
 | **T7** | 加载 / 空状态 / 无原图 / 禁用等边界态 | **已完成（P-11）** | T1 | `result.js` ≈90 行、`components.css` | 骨架→内容无跳动；`aria-busy` 复位 |
@@ -71,7 +71,7 @@ derived_from: process/2026-10-19_process.log.md
 | **C1** | Electron 31.7.7 → Chromium 126。`color-mix`、`::highlight`、`:has` 均可用；但 D4 限制选区色写法。 |
 | **C2** | 无打包器，纯 `<script>` 引入。新增 npm 依赖需要连带改构建，成本高于手写。 |
 | **C3** | DOM 契约：`.text-panel > .editor[contenteditable] > .item*`；`.item` / `.box` 选择器被联动与测试依赖，必须保留。`.item` 自身不再声明 contentEditable，编辑能力由父级继承（不要再改回逐行编辑）。 |
-| **C4** | `test_result_ui.js` 现有断言是红线，尤其 `::selection` 已声明、`.item` `padding-top=0`（`S3:150`）、`.empty` 文案精确匹配。 |
+| **C4** | `tests/test_result_ui.js` 现有断言是红线，尤其 `::selection` 已声明、`.item` `padding-top=0`（`S3:150`）、`.empty` 文案精确匹配。 |
 | **C5** | 复制全文 = `screens[].items[].text` 按数组顺序 join（`S2:292-299`）；任何改变行数的编辑都会污染结果。 |
 | **C6** | 单引擎项目，不必为 Firefox/Safari 做兼容取舍（`::highlight` 的 Firefox 149 支持与否不影响本项目）。 |
 | **C7** | 样式分层不改变既有选择器名（`.toolbar/.item/.box/.editor/.text-panel/.img-panel/.empty/#status` 全保留）；新组件用扁平 kebab（`.btn-ghost`），状态用 `is-*`（`.is-count/.is-selecting/.is-done/.is-loading`）。 |
@@ -89,7 +89,7 @@ derived_from: process/2026-10-19_process.log.md
 | **F5** | `context/process/2026-10-19_process.log.md` | 21,121 B | 只追加，含原始命令输出（P-01…P-11） |
 | **F6** | `src/renderer/result.html` | 1,185 B / 24 行 | 已改：只剩结构，样式走 `<link>` |
 | **F7** | `src/renderer/result.js` | 24,315 B / 671 行 | 已改：骨架/空状态/占位/浮条/兜底定时器 |
-| **F8** | `test_result_ui.js` | 16,237 B / 313 行 | 已改：**39 项**断言 |
+| **F8** | `tests/test_result_ui.js` | 16,237 B / 313 行 | 已改：**39 项**断言 |
 | **F9** | `docs/screenshots/design-*.png` | 8 张 | 本轮效果留档（宽/选中/加载/空/窄/720/设置 540/设置 440 EN） |
 | **F10** | `dist/screen-ocr-setup-0.2.1.exe`、`dist/截屏OCR-0.2.1-win.zip`、`dist/latest.yml`、`dist/SHA256SUMS-0.2.1.txt` | 175 MB / 224 MB / 349 B | **0.2.1 分发产物**；清单 url 与文件名一致 |
 | **F11** | `src/renderer/styles/tokens.css` | 2,795 B / 87 行 | 新建：令牌单一来源 |
@@ -124,7 +124,7 @@ derived_from: process/2026-10-19_process.log.md
 |---|---|---|
 | **S1** | `src/renderer/styles/tokens.css` + `result.css`（原 `result.html` 内联样式已迁出） | 令牌 `tokens:1-87`、`::selection` 在 `base.css:30`、识别框三态 `result.css` 识别框段、文字块、响应式 `result.css` 末尾 |
 | **S2** | `src/renderer/result.js`（625 行） | 选区节流+兜底 `:83-99`、复制反馈 `:101-115`、加载/空状态 `:117-194`、单编辑根 `:270-330`、浮条 `:498-590`、全文拼接 `:452-460` |
-| **S3** | `test_result_ui.js`（290 行） | hex 解析 `:70`、`padding` 断言、窄屏断言、新增状态断言 `:210+` |
+| **S3** | `tests/test_result_ui.js`（290 行） | hex 解析 `:70`、`padding` 断言、窄屏断言、新增状态断言 `:210+` |
 | **S4** | `截屏OCR工具-Windows实现规划.md`（299 行） | 仅取架构背景；**路线 A 已废弃、`onnxruntime-node` ABI 坑已不适用**，不再引用 |
 | **S5** | `src/renderer/overlay.html`（43 行） | 遮罩页主色 `#3b82f6`，确认设计语言同源 |
 | **E1** | 实验输出（见 `process` P-02） | `RESULT_A` 12 字/1 行；`RESULT_B` 38 字/3 行 |
@@ -139,7 +139,7 @@ derived_from: process/2026-10-19_process.log.md
 T1–T8 已完成：结果页单一编辑根（.text-panel > .editor[contenteditable] > .item）、八种状态、选区浮条，
 样式分层在 src/renderer/styles/{tokens,base,components}.css + {result,settings}.css。
 动代码前先跑（必须传 --no-sandbox；脚本含 Electron 时用 env -u ELECTRON_RUN_AS_NODE）：
-  test_result_ui.js（39 项）+ test_i18n_ui.js + test_settings.js + node test_i18n_scan.js。
+  tests/test_result_ui.js（39 项）+ tests/test_i18n_ui.js + tests/test_settings.js + node tests/test_i18n_scan.js。
 约束：不要改回逐行 contentEditable；不引入 npm 依赖；--sel-bg 保持字面 hex；
       .empty 的 textContent 必须精确等于 i18n 原文案；窗口尺寸断言用 waitFor 轮询。
 ```
