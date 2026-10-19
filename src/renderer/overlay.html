@@ -22,6 +22,26 @@
     border:1px solid rgba(255,255,255,0.7); border-radius:4px;
     box-shadow:0 2px 10px rgba(0,0,0,0.45); pointer-events:none;
   }
+  /* 识别中提示：松手后 OCR 可能持续数秒，给一个明确的"在干活"信号 */
+  #busy {
+    position:absolute; left:50%; bottom:48px; transform:translateX(-50%);
+    display:flex; align-items:center; gap:8px;
+    padding:8px 14px; border-radius:999px;
+    background:rgba(15,23,42,0.88); color:#fff;
+    font:13px/1 "Microsoft YaHei", sans-serif; white-space:nowrap;
+    box-shadow:0 8px 24px rgba(0,0,0,0.35);
+    pointer-events:none; z-index:11;
+  }
+  #busy[hidden] { display:none; }
+  #busy .dot {
+    width:12px; height:12px; border-radius:50%;
+    border:2px solid rgba(255,255,255,0.35); border-top-color:#fff;
+    animation:busy-spin .8s linear infinite;
+  }
+  @keyframes busy-spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    #busy .dot { animation:none; border-top-color:rgba(255,255,255,0.35); }
+  }
 </style>
 </head>
 <body>
@@ -34,6 +54,7 @@
     <div id="mask-right" class="mask mask-legacy"></div>
     <div id="sel"></div>
     <div id="size-tip"></div>
+    <div id="busy" hidden><span class="dot"></span><span id="busy-text"></span></div>
   </div>
   <canvas id="mag" width="150" height="100"></canvas>
   <script src="../shared/i18n.js"></script>

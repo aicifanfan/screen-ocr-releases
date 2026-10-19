@@ -1,6 +1,6 @@
 {
   "name": "screen-ocr",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "截屏 OCR 工具：截取屏幕任意区域，本地识别文字并支持划选复制",
   "main": "src/main/index.js",
   "scripts": {

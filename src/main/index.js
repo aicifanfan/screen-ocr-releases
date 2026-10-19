@@ -11,6 +11,7 @@ const { setup: setupUpdater, checkForUpdates } = require('./updater')
 const I18n = require('../shared/i18n')
 const log = require('./log')
 const fs = require('fs')
+const { execFile } = require('child_process')
 
 log.init()
 
@@ -312,21 +313,67 @@ function closeOverlay() {
 }
 
 // 打开结果窗口
-function showResultWindow() {
-  if (resultWin) { resultWin.focus(); return }
+// 说明：窗口默认隐藏创建，等页面「首屏可绘制」（ready-to-show）再显示：
+//   1) 避免加载期的白屏闪烁；
+//   2) OCR 进行中就可以先把窗口建好（见 capture:region），结果一到直接显示，
+//      不再让用户多等一次页面加载（实测 ~560ms）。
+let resultWinReady = false     // 页面是否已完成加载
+let resultPending = false      // OCR 是否仍在进行（结果为 null 时区分「还没来」与「确实没有」）
+let showResultOnReady = false  // 数据先到、页面还没加载完：加载完成后自动显示
+
+function createResultWindow() {
   resultWin = new BrowserWindow({
     width: 720,
     height: 560,
     title: t('result.title'),
+    show: false,
+    backgroundColor: '#f8fafc', // 与页面底色一致，消除启动瞬间的白块
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=' + currentLang] }
   })
+  resultWinReady = false
   resultWin.loadFile(path.join(__dirname, '..', 'renderer', 'result.html'))
-  resultWin.webContents.once('did-finish-load', () => {
-    // force-device-scale-factor=1 让结果页在高 DPI 屏上偏小，按系统 DPI 缩放补偿回正常大小
-    resultWin.webContents.setZoomFactor(getSystemScaleFactor())
-    resultWin.focus()
+  // 加载失败 / 渲染进程崩溃必须留痕，否则表现为「识别完成但没有窗口」
+  resultWin.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    log.error('结果页加载失败: code=' + code + ' ' + desc + ' url=' + url)
   })
-  resultWin.on('closed', () => { resultWin = null })
+  resultWin.webContents.on('render-process-gone', (_e, det) => {
+    log.error('结果页渲染进程退出: reason=' + det.reason + ' exitCode=' + det.exitCode)
+  })
+  resultWin.once('ready-to-show', () => {
+    resultWinReady = true
+    applyZoom(resultWin)
+    if (showResultOnReady && resultWin && !resultWin.isDestroyed()) {
+      showResultOnReady = false
+      resultWin.show()
+      resultWin.focus()
+    }
+  })
+  resultWin.on('closed', () => {
+    resultWin = null
+    resultWinReady = false
+    showResultOnReady = false
+  })
+  return resultWin
+}
+
+// OCR 开始时预建窗口：把页面加载摊到识别耗时里，结果到达即显示。
+// 失败重试不影响：窗口只是隐藏着，不会打扰用户。
+function preloadResultWindow() {
+  if (resultWin && !resultWin.isDestroyed()) return
+  resultPending = true
+  createResultWindow()
+  log.info('结果窗口预加载（OCR 进行中）')
+}
+
+function openResultWindow() {
+  if (!resultWin || resultWin.isDestroyed()) createResultWindow()
+  if (resultWinReady) {
+    applyZoom(resultWin)
+    resultWin.show()
+    resultWin.focus()
+    return
+  }
+  showResultOnReady = true
 }
 
 // 打开设置窗口
@@ -348,28 +395,60 @@ function showSettingsWindow() {
   settingsWin.loadFile(path.join(__dirname, '..', 'renderer', 'settings.html'))
   settingsWin.webContents.once('did-finish-load', () => {
     // force-device-scale-factor=1 下按系统 DPI 缩放补偿，保证设置页在高 DPI 屏清晰可读
-    settingsWin.webContents.setZoomFactor(getSystemScaleFactor())
+    // （异步读取，避免 PowerShell 阻塞主进程）
+    applyZoom(settingsWin)
   })
   settingsWin.on('closed', () => { settingsWin = null })
 }
 
-// 读取 Windows 系统缩放（主屏 DPI），用于结果页缩放补偿。
+// 读取 Windows 系统缩放（主屏 DPI），用于结果页 / 设置页缩放补偿。
 // 因 force-device-scale-factor=1 后 screen.scaleFactor 恒为 1，改从注册表取原始值。
+//
+// 必须异步：execSync 调 PowerShell 实测 ~1.0s，且整段阻塞主进程；
+// 而这一刻渲染进程正在等 settings:get / result:get，表现为「窗口出来了，内容半天不来」。
+// 改为异步 + 启动预热：窗口打开时通常已有缓存，取不到就等 Promise，不再卡事件循环。
 let cachedScale = null
-function getSystemScaleFactor() {
-  if (cachedScale) return cachedScale
-  try {
-    const { execSync } = require('child_process')
-    const out = execSync(
-      'powershell -NoProfile -Command "(Get-ItemProperty \'HKCU:\\Control Panel\\Desktop\\WindowMetrics\').AppliedDPI"',
-      { encoding: 'utf8', timeout: 3000 }
-    )
-    const dpi = parseInt(out.trim(), 10)
-    cachedScale = dpi >= 96 ? dpi / 96 : 1
-  } catch {
-    cachedScale = 1
-  }
-  return cachedScale
+let scalePromise = null
+
+function readSystemScale() {
+  if (cachedScale) return Promise.resolve(cachedScale)
+  if (scalePromise) return scalePromise
+
+  scalePromise = new Promise((resolve) => {
+    const done = (v) => {
+      cachedScale = v
+      scalePromise = null
+      resolve(v)
+    }
+    try {
+      execFile(
+        'powershell',
+        ['-NoProfile', '-Command', "(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop\\WindowMetrics').AppliedDPI"],
+        { encoding: 'utf8', timeout: 2500, windowsHide: true },
+        (err, stdout) => {
+          if (err) return done(1)
+          const dpi = parseInt(String(stdout || '').trim(), 10)
+          // 合理区间 96(100%) ~ 288(300%)；异常值一律按 100%，避免把窗口放大到不可用
+          done(Number.isFinite(dpi) && dpi >= 96 && dpi <= 288 ? dpi / 96 : 1)
+        }
+      )
+    } catch {
+      done(1)
+    }
+  })
+  return scalePromise
+}
+
+// 应用缩放：有缓存立即生效；没有则异步补上（不影响窗口先显示）
+function applyZoom(win) {
+  if (!win || win.isDestroyed()) return
+  readSystemScale()
+    .then((scale) => {
+      if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.setZoomFactor(scale)
+      }
+    })
+    .catch(() => { /* 缩放补偿失败不影响主流程 */ })
 }
 
 // 触发一次截屏：捕获所有屏 → 打开遮罩（每屏一窗，每次全新创建）
@@ -417,33 +496,62 @@ ipcMain.handle('overlay:dragEnd', () => {
   return rect
 })
 
-// IPC：渲染进程已裁好选区（PNG dataURL）→ 交给 OCR
+// IPC：渲染进程已裁好选区（图片 dataURL）→ 交给 OCR
+// 优化点：
+//   1) 不再 decode 成 Buffer 再 base64 —— 直接把 base64 透传给 sidecar，省两次整块拷贝；
+//   2) 进 OCR 前先把结果窗口预建好（隐藏），页面加载与识别并行，结果到达即可显示；
+//   3) 入口处做格式/体积校验，异常输入直接给错误码，不让坏数据进 Python。
+const MAX_IMAGE_BASE64 = 24 * 1024 * 1024 // ≈18MB 二进制，远超任何正常选区
+
 ipcMain.handle('capture:region', async (_e, dataUrl) => {
-  const b64 = String(dataUrl).split(',')[1]
-  if (!b64) throw new Error('E_EMPTY_SELECTION') // 渲染层按错误码翻译，避免硬编码文案
-  const buf = Buffer.from(b64, 'base64')
+  const raw = typeof dataUrl === 'string' ? dataUrl : ''
+  const m = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=\s]+)$/.exec(raw)
+  if (!m) throw new Error('E_EMPTY_SELECTION') // 渲染层按错误码翻译，避免硬编码文案
+  const b64 = m[2].replace(/\s+/g, '')
+  if (!b64) throw new Error('E_EMPTY_SELECTION')
+  if (b64.length > MAX_IMAGE_BASE64) throw new Error('E_IMAGE_TOO_LARGE')
+
   const t0 = Date.now()
-  const res = await ocr.recognize(buf)
-  log.info('OCR 完成: ' + (res.texts || []).length + ' 行 | 引擎耗时 ' +
-    (res.elapse_ms != null ? res.elapse_ms + 'ms' : '?') + ' | 端到端 ' + (Date.now() - t0) +
-    'ms | 档位 ' + (res.profile || ocr.profile))
-  return res
+  preloadResultWindow() // 与 OCR 并行加载结果页
+  try {
+    const res = await ocr.recognizeBase64(b64)
+    resultPending = false
+    log.info('OCR 完成: ' + (res.texts || []).length + ' 行 | 引擎耗时 ' +
+      (res.elapse_ms != null ? res.elapse_ms + 'ms' : '?') + ' | 端到端 ' + (Date.now() - t0) +
+      'ms | 档位 ' + (res.profile || ocr.profile))
+    return res
+  } catch (e) {
+    resultPending = false
+    log.error('OCR 失败: ' + (e && e.message ? e.message : e))
+    throw e
+  }
 })
 
 // IPC：遮罩页识别完成后，把结果交给主进程并打开/刷新结果窗口
 ipcMain.handle('show:result', (_e, payload) => {
-  resultData = payload
-  if (resultWin) {
-    // 结果窗口已存在：推送新结果并聚焦（支持连续截图）
-    resultWin.webContents.send('result:update', payload)
-    resultWin.focus()
-  } else {
-    showResultWindow()
+  const valid = payload && Array.isArray(payload.screens) && payload.screens.length > 0
+  if (!valid) {
+    resultPending = false
+    log.warn('show:result 收到空结果，忽略')
+    return { ok: false, reason: 'EMPTY' }
   }
+  resultData = payload
+  resultPending = false
+
+  if (resultWin && !resultWin.isDestroyed()) {
+    // 预加载窗口：直接推数据（页面可能还在加载，加载完会自己 getResult 再渲染）
+    if (resultWinReady) resultWin.webContents.send('result:update', payload)
+    openResultWindow()
+  } else {
+    createResultWindow()
+    openResultWindow()
+  }
+  return { ok: true }
 })
 
 // IPC：结果窗口加载后拉取结果数据
-ipcMain.handle('result:get', () => resultData)
+// resultPending 时返回 pending 标记：页面保持骨架屏，而不是误判成「没识别到文字」
+ipcMain.handle('result:get', () => (resultPending ? { pending: true } : resultData))
 
 // IPC：写剪贴板
 ipcMain.handle('clipboard:copy', (_e, text) => copyText(text))
@@ -530,6 +638,11 @@ app.whenReady().then(() => {
 
   // 预热 OCR 模型，避免首次截图卡顿
   ocr.init().catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
+
+  // 预热系统缩放读取：把 ~1s 的外部进程调用挪到启动阶段（异步，不阻塞窗口）
+  readSystemScale()
+    .then((s) => log.info('系统缩放 = ' + s + 'x'))
+    .catch(() => {})
 
   // 启动后**不自动截屏**：必须由用户主动触发（快捷键 / 托盘菜单 / 再次双击图标）。
   // 仅当用户在设置里显式开启「启动时立即截屏」时才自动弹遮罩。

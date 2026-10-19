@@ -305,6 +305,34 @@ app.whenReady().then(async () => {
   check('空状态含图标与补充提示', empty.icon === true && empty.hint.length > 0, empty.hint)
   check('空状态结束加载态', empty.busy === 'false', empty.busy)
 
+  // —— 12. 识别中（pending）保持骨架；坏图回退占位 ——
+  ipcMain.removeHandler('result:get')
+  ipcMain.handle('result:get', () => ({ pending: true }))
+  const winPending = await spawn()
+  await waitFor(winPending, `!!document.querySelector('.skeleton')`)
+  await sleep(280)
+  const pendingState = await winPending.webContents.executeJavaScript(`({
+    skeleton: !!document.querySelector('.skeleton'),
+    empty: !!document.querySelector('.empty'),
+    busy: document.getElementById('main').getAttribute('aria-busy')
+  })`)
+  check('识别中保持骨架屏（不误判成空结果）', pendingState.skeleton === true && pendingState.empty === false,
+    'skeleton=' + pendingState.skeleton + ' empty=' + pendingState.empty)
+  check('识别中 aria-busy=true', pendingState.busy === 'true', pendingState.busy)
+
+  await winPending.webContents.send('result:update', {
+    screens: [{ label: '', labelKind: 'selection', image: 'data:image/png;base64,not-a-real-image', texts: ['来了'], boxes: [], scores: [] }]
+  })
+  await waitFor(winPending, `document.querySelectorAll('.item').length === 1`)
+  const afterUpdate = await winPending.webContents.executeJavaScript(`new Promise((r) => setTimeout(() => r({
+    items: document.querySelectorAll('.item').length,
+    skeleton: !!document.querySelector('.skeleton'),
+    imgPlaceholder: (document.querySelector('.img-empty') || {}).textContent || ''
+  }), 260))`)
+  check('结果推送后替换骨架并渲染', afterUpdate.items === 1 && afterUpdate.skeleton === false,
+    'items=' + afterUpdate.items)
+  check('坏图回退为占位（不出现破图）', afterUpdate.imgPlaceholder.length > 0, afterUpdate.imgPlaceholder)
+
   console.log(pass ? '[ALL PASS] 结果页视觉与交互验证通过' : '[FAIL] 存在未通过项')
   if (!pass) process.exitCode = 1
   app.quit()

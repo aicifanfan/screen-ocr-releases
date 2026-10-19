@@ -194,7 +194,14 @@ function renderEmpty() {
 // 核心：根据结果渲染（首次打开与连续截图刷新共用）
 // 兼容两种结构：{ screens:[{label,image,texts,boxes,scores}] } 或旧 { texts,boxes,scores,image }
 function render(result) {
-  const raw = result.screens || [{
+  // 边界：结构与字段都可能缺失（旧版本主进程、异常数据）→ 不抛错，退回空状态
+  if (!result || typeof result !== 'object') {
+    hasResult = false
+    renderEmpty()
+    return
+  }
+
+  const raw = Array.isArray(result.screens) && result.screens.length ? result.screens : [{
     label: result.label || '',
     image: result.image,
     texts: result.texts || [],
@@ -202,11 +209,15 @@ function render(result) {
     scores: result.scores
   }]
 
-  screens = raw.map((s) => {
-    const items = (s.texts || []).map((t, i) => ({
-      text: t,
-      box: s.boxes && s.boxes[i] ? s.boxes[i] : null,
-      score: s.scores && s.scores[i] != null ? s.scores[i] : null
+  screens = raw.filter(Boolean).map((s) => {
+    // texts/boxes/scores 长度可能不一致：以 texts 为准，越界按 null 处理
+    const texts = Array.isArray(s.texts) ? s.texts : []
+    const boxes = Array.isArray(s.boxes) ? s.boxes : []
+    const scores = Array.isArray(s.scores) ? s.scores : []
+    const items = texts.map((t, i) => ({
+      text: t == null ? '' : String(t),
+      box: Array.isArray(boxes[i]) && boxes[i].length >= 4 ? boxes[i] : null,
+      score: typeof scores[i] === 'number' ? scores[i] : null
     }))
     // 按坐标还原大致阅读顺序：先按 y（行），同行的按 x（列）
     items.sort((a, b) => {
@@ -345,7 +356,16 @@ function renderScreen(s, si, showTitle) {
     const img = document.createElement('img')
     img.draggable = false
     img.alt = t('result.imageAlt')
+    img.decoding = 'async' // 解码不阻塞首屏排版
     img.onload = () => drawBoxes(img, s, si)
+    // 边界：base64 损坏 / 加载失败 → 占位，不留一个破图图标
+    img.onerror = () => {
+      if (imgPanel._img === img) {
+        imgPanel._img = null
+        imgPanel._boxLayer = null
+      }
+      if (wrap.parentElement === imgPanel) imgPanel.replaceChild(createImagePlaceholder(), wrap)
+    }
     img.src = s.image
 
     const boxLayer = document.createElement('div')
@@ -363,10 +383,7 @@ function renderScreen(s, si, showTitle) {
     if (imgResizeObserver) imgResizeObserver.observe(imgPanel)
   } else {
     // 边界：识别成功但没有截图（如纯文本结果）——占位而不是留一片空白
-    const placeholder = document.createElement('div')
-    placeholder.className = 'img-empty'
-    placeholder.textContent = t('result.noImage')
-    imgPanel.appendChild(placeholder)
+    imgPanel.appendChild(createImagePlaceholder())
   }
   body.appendChild(imgPanel)
 
@@ -374,10 +391,20 @@ function renderScreen(s, si, showTitle) {
   mainEl.appendChild(group)
 }
 
+function createImagePlaceholder() {
+  const placeholder = document.createElement('div')
+  placeholder.className = 'img-empty'
+  placeholder.textContent = t('result.noImage')
+  return placeholder
+}
+
 // 按物理坐标 + 缩放比画识别框（双索引联动）
 function drawBoxes(img, s, si) {
+  // 边界：图片已被占位替换 / 面板已移除 / 数据不完整 → 直接跳过
+  if (!img || !img.parentElement || !img.parentElement.parentElement) return
   const imgPanel = img.parentElement.parentElement
   const boxLayer = imgPanel._boxLayer
+  if (!boxLayer || !s || !Array.isArray(s.items)) return
   const nw = img.naturalWidth
   const nh = img.naturalHeight
   if (!nw || !nh) return
@@ -654,6 +681,11 @@ async function init() {
   } catch (e) {
     result = null // 取结果失败：走空状态，不能让窗口停在骨架屏
   }
+
+  // 主进程还在识别：保持骨架屏，等 result:update 推结果过来。
+  // 这里必须区分「还没来」和「确实没有」，否则会先闪一下"未识别到文字"。
+  if (result && result.pending) return
+
   if (!result || !(result.screens && result.screens.length) && !(result.texts && result.texts.length)) {
     renderEmpty()
     return

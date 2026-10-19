@@ -28,13 +28,32 @@ window.api.onLanguageChanged((payload) => {
 // 主进程返回的错误码 → 词典 key；未收录的错误保留原始信息
 const ERROR_KEYS = {
   E_EMPTY_SELECTION: 'overlay.emptySelection',
-  E_OCR_EXITED: 'overlay.ocrExited'
+  E_OCR_EXITED: 'overlay.ocrExited',
+  E_OCR_NOT_RUNNING: 'overlay.ocrExited',
+  E_OCR_READY_TIMEOUT: 'overlay.ocrExited',
+  E_OCR_TIMEOUT: 'overlay.timeout',
+  E_IMAGE_TOO_LARGE: 'overlay.tooLarge'
 }
 
 function translateError(err) {
   const msg = (err && err.message) ? err.message : String(err)
-  if (ERROR_KEYS[msg]) return t(ERROR_KEYS[msg])
+  // 带后缀的错误（如 "E_OCR_SPAWN: xxx"）取冒号前的码
+  const code = msg.split(':')[0].trim()
+  if (ERROR_KEYS[code]) return t(ERROR_KEYS[code])
   return t('overlay.error', { message: msg })
+}
+
+// —— 识别中提示 ——
+// 松手后到结果窗口出现之间要等 OCR（accurate 档可达数秒），没有反馈会像"卡死"。
+const busyEl = document.getElementById('busy')
+const busyTextEl = document.getElementById('busy-text')
+function showBusy() {
+  if (!busyEl) return
+  busyTextEl.textContent = t('overlay.recognizing')
+  busyEl.hidden = false
+}
+function hideBusy() {
+  if (busyEl) busyEl.hidden = true
 }
 
 applyLanguage(window.api.initialLanguage)
@@ -303,6 +322,7 @@ document.addEventListener('mouseup', async () => {
   try {
     const { canvas, label, labelKind, labelIndex } = cropRect(rect) || {}
     if (!canvas) return
+    showBusy() // 让用户知道正在识别，而不是界面没反应
     const dataUrl = canvas.toDataURL('image/png')
     const result = await window.api.captureRegion(dataUrl)
     // 屏名不直接写死文案：带上 labelKind/labelIndex，由结果页按当前语言生成
@@ -317,6 +337,7 @@ document.addEventListener('mouseup', async () => {
     })
     await window.api.closeOverlay()
   } catch (err) {
+    hideBusy()
     alert(translateError(err))
     await window.api.closeOverlay()
   }

@@ -70,7 +70,7 @@
       // 设置页：通用
       'settings.card.general': '通用',
       'settings.ocr.label': '识别精度',
-      'settings.ocr.desc': '均衡：速度与准确度兼顾（推荐）；高精度更准但明显更慢；快速适合大段文字',
+      'settings.ocr.desc': '均衡：速度与准确度兼顾（推荐）；高精度更准但约慢 10 倍；快速适合大段文字',
       'settings.ocr.fast': '快速',
       'settings.ocr.balanced': '均衡',
       'settings.ocr.accurate': '高精度',
@@ -144,6 +144,9 @@
       'overlay.error': '识别失败：{message}',
       'overlay.emptySelection': '选区数据为空',
       'overlay.ocrExited': '识别服务已退出，请重试',
+      'overlay.recognizing': '正在识别…',
+      'overlay.timeout': '识别超时，请缩小选区后重试',
+      'overlay.tooLarge': '选区过大，请缩小范围后重试',
       'overlay.captureFailed': '截图失败：{message}',
 
       // 主进程：设置保存错误
@@ -187,7 +190,7 @@
 
       'settings.card.general': 'General',
       'settings.ocr.label': 'Recognition accuracy',
-      'settings.ocr.desc': 'Balanced: good speed and accuracy (recommended). Accurate is better but slower. Fast suits large blocks of text.',
+      'settings.ocr.desc': 'Balanced: good speed and accuracy (recommended). Accurate is more precise but ~10x slower. Fast suits large blocks of text.',
       'settings.ocr.fast': 'Fast',
       'settings.ocr.balanced': 'Balanced',
       'settings.ocr.accurate': 'Accurate',
@@ -256,6 +259,9 @@
       'overlay.error': 'Recognition failed: {message}',
       'overlay.emptySelection': 'Empty selection data',
       'overlay.ocrExited': 'The recognition service has stopped. Please try again.',
+      'overlay.recognizing': 'Recognizing…',
+      'overlay.timeout': 'Recognition timed out. Try selecting a smaller area.',
+      'overlay.tooLarge': 'Selection is too large. Select a smaller area.',
       'overlay.captureFailed': 'Capture failed: {message}',
 
       'error.unknown': 'Unknown error'

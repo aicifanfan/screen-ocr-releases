@@ -1,7 +1,17 @@
 // OCR 桥接：spawn Python 子进程，通过 stdio 逐行 JSON 通信
+//
+// 健壮性约定（改之前先看）：
+//   1. 任何等待都有上限：sidecar 冷启动 25s、单次识别 90s（accurate 大图实测 40s+）；
+//   2. 进程退出 / 写入失败 / 超时都必须让挂起的请求失败，不能把 UI 永久挂在骨架屏上；
+//   3. 只在「进程没了」时自动重启重试一次；超时不重试（避免同一张图把 CPU 打满两遍）。
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+
+// 超时可被环境变量覆盖：自动化测试用小值，避免真的等 25s/90s
+const READY_TIMEOUT = Number(process.env.SCREEN_OCR_READY_TIMEOUT) || 25000
+const REQUEST_TIMEOUT = Number(process.env.SCREEN_OCR_REQUEST_TIMEOUT) || 90000
+const RETRYABLE = /E_OCR_(EXITED|NOT_RUNNING|SPAWN)/
 
 class OcrBridge {
   constructor(profile) {
@@ -10,43 +20,57 @@ class OcrBridge {
     this.profile = profile || 'balanced' // fast / balanced / accurate
     this.pending = new Map() // seq -> { resolve, reject }
     this.seq = 0
+    this._readyPromise = null
     this._readyResolve = null
+    this._readyReject = null
   }
 
   _resolvePython() {
     // 打包后：优先使用 extraResources 里的 ocr_server 目录（onedir 结构）
     const exe = path.join(process.resourcesPath || '', 'ocr_server', 'ocr_server.exe')
-    if (fs.existsSync(exe)) return { cmd: exe, args: [] }
+    try {
+      if (fs.existsSync(exe)) return { cmd: exe, args: [] }
+    } catch { /* 资源目录不可读 → 走开发期路径 */ }
 
     // 开发期：优先环境变量指定的 python，否则用系统 python
+    // SCREEN_OCR_SCRIPT 仅用于自动化测试（换成假 sidecar），生产环境不要设置
     const py = process.env.SCREEN_OCR_PYTHON || 'python'
-    const script = path.join(__dirname, '..', '..', 'python', 'ocr_server.py')
+    const script = process.env.SCREEN_OCR_SCRIPT || path.join(__dirname, '..', '..', 'python', 'ocr_server.py')
     return { cmd: py, args: [script] }
   }
 
-  async init() {
-    if (this.proc) return this._waitReady()
-    const { cmd, args } = this._resolvePython()
+  init() {
+    if (this.proc && this.ready) return Promise.resolve()
+    if (!this.proc) this._spawn()
+    return this._waitReady()
+  }
 
-    this.proc = spawn(cmd, args, {
+  _spawn() {
+    const { cmd, args } = this._resolvePython()
+    const proc = spawn(cmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       // 通过环境变量把识别档位传给 sidecar（balanced 为默认，速度/精度均衡）
       env: { ...process.env, SCREEN_OCR_PROFILE: this.profile }
     })
+    this.proc = proc
+    this.ready = false
 
-    this.proc.stderr.on('data', (d) => console.error('[ocr:stderr]', d.toString().trim()))
-    this.proc.on('error', (e) => console.error('[ocr] 启动失败：', e.message))
-    this.proc.on('exit', (code) => {
-      console.error('[ocr] 子进程退出，code =', code)
-      this.proc = null
+    proc.stderr.on('data', (d) => console.error('[ocr:stderr]', String(d).trim()))
+    proc.on('error', (e) => {
+      console.error('[ocr] 启动失败：', e.message)
+      if (this.proc === proc) this.proc = null
       this.ready = false
-      // 挂起的请求全部失败
-      for (const [, p] of this.pending) p.reject(new Error('E_OCR_EXITED'))
-      this.pending.clear()
+      this._failAll('E_OCR_SPAWN: ' + e.message)
+    })
+    proc.on('exit', (code) => {
+      console.error('[ocr] 子进程退出，code =', code)
+      if (this.proc === proc) this.proc = null
+      this.ready = false
+      this._failAll('E_OCR_EXITED')
     })
 
     let buf = ''
-    this.proc.stdout.on('data', (d) => {
+    proc.stdout.on('data', (d) => {
       buf += d.toString()
       let idx
       while ((idx = buf.indexOf('\n')) >= 0) {
@@ -55,17 +79,22 @@ class OcrBridge {
         if (line) this._onLine(line)
       }
     })
+  }
 
-    return this._waitReady()
+  // 进程不可用：让所有挂起请求与「等 ready」的调用都失败，避免永久等待
+  _failAll(message) {
+    for (const [, p] of this.pending) p.reject(new Error(message))
+    this.pending.clear()
+    if (this._readyReject) this._readyReject(new Error(message))
   }
 
   _onLine(line) {
     let msg
-    try { msg = JSON.parse(line) } catch { return }
+    try { msg = JSON.parse(line) } catch { return } // 非 JSON 行（第三方库日志）直接忽略
 
     if (msg.type === 'ready') {
       this.ready = true
-      if (this._readyResolve) { this._readyResolve(); this._readyResolve = null }
+      if (this._readyResolve) this._readyResolve()
       return
     }
 
@@ -73,29 +102,95 @@ class OcrBridge {
     if (seq != null && this.pending.has(seq)) {
       const { resolve, reject } = this.pending.get(seq)
       this.pending.delete(seq)
-      if (msg.type === 'error') reject(new Error(msg.message))
+      if (msg.type === 'error') reject(new Error(msg.message || 'E_OCR'))
       else resolve(msg)
     }
   }
 
-  _waitReady() {
+  _waitReady(timeout = READY_TIMEOUT) {
     if (this.ready) return Promise.resolve()
-    return new Promise((resolve) => { this._readyResolve = resolve })
+    if (!this.proc) return Promise.reject(new Error('E_OCR_NOT_RUNNING'))
+    if (this._readyPromise) return this._readyPromise
+
+    this._readyPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error('E_OCR_READY_TIMEOUT'))
+      }, timeout)
+      const cleanup = () => {
+        clearTimeout(timer)
+        this._readyPromise = null
+        this._readyResolve = null
+        this._readyReject = null
+      }
+      this._readyResolve = () => { cleanup(); resolve() }
+      this._readyReject = (e) => { cleanup(); reject(e) }
+    })
+    return this._readyPromise
   }
 
-  _send(msg) {
+  _send(msg, timeout = REQUEST_TIMEOUT) {
     return new Promise((resolve, reject) => {
+      if (!this.proc || !this.proc.stdin || this.proc.stdin.destroyed) {
+        reject(new Error('E_OCR_NOT_RUNNING'))
+        return
+      }
       const seq = ++this.seq
-      this.pending.set(seq, { resolve, reject })
-      this.proc.stdin.write(JSON.stringify({ ...msg, seq }) + '\n')
+      const timer = setTimeout(() => {
+        this.pending.delete(seq)
+        reject(new Error('E_OCR_TIMEOUT'))
+      }, timeout)
+
+      this.pending.set(seq, {
+        resolve: (m) => { clearTimeout(timer); resolve(m) },
+        reject: (e) => { clearTimeout(timer); reject(e) }
+      })
+
+      try {
+        this.proc.stdin.write(JSON.stringify({ ...msg, seq }) + '\n')
+      } catch (e) {
+        this.pending.delete(seq)
+        clearTimeout(timer)
+        reject(new Error('E_OCR_WRITE: ' + e.message))
+      }
     })
   }
 
-  /** 识别一张图片（PNG Buffer），返回 { texts, boxes, scores, elapse_ms } */
+  /** 识别一张图片（base64，不带 dataURL 前缀），返回 { texts, boxes, scores, elapse_ms } */
+  async recognizeBase64(b64) {
+    if (typeof b64 !== 'string' || !b64.length) throw new Error('E_EMPTY_SELECTION')
+    return this._recognize({ type: 'recognize', image: b64 })
+  }
+
+  /** 兼容旧调用：接受 Buffer */
   async recognize(imageBuffer) {
-    await this.init()
-    const b64 = imageBuffer.toString('base64')
-    return this._send({ type: 'recognize', image: b64 })
+    if (!imageBuffer || !imageBuffer.length) throw new Error('E_EMPTY_SELECTION')
+    return this.recognizeBase64(Buffer.from(imageBuffer).toString('base64'))
+  }
+
+  async _recognize(msg, retried) {
+    try {
+      await this.init()
+      return await this._send(msg)
+    } catch (e) {
+      // 只在进程没了的时候重启重试一次；超时不重试
+      if (!retried && RETRYABLE.test(String(e && e.message))) {
+        this.reset()
+        return this._recognize(msg, true)
+      }
+      throw e
+    }
+  }
+
+  /** 丢弃当前进程（下次 init 会重新拉起） */
+  reset() {
+    const proc = this.proc
+    this.proc = null
+    this.ready = false
+    this._failAll('E_OCR_EXITED')
+    if (proc) {
+      try { proc.kill() } catch { /* 已退出 */ }
+    }
   }
 
   /** 运行时切换识别档位（fast / balanced / accurate），无需重启 sidecar */
@@ -113,10 +208,14 @@ class OcrBridge {
   }
 
   close() {
-    if (this.proc) {
-      try { this.proc.stdin.write(JSON.stringify({ type: 'exit' }) + '\n') } catch {}
-      this.proc = null
-      this.ready = false
+    const proc = this.proc
+    this.proc = null
+    this.ready = false
+    this._failAll('E_OCR_CLOSED')
+    if (proc) {
+      try { proc.stdin.write(JSON.stringify({ type: 'exit' }) + '\n') } catch { /* 已退出 */ }
+      // 留一点时间让 sidecar 自己退出，超时再强杀
+      setTimeout(() => { try { proc.kill() } catch { /* 已退出 */ } }, 500)
     }
   }
 }

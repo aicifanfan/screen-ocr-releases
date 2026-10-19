@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.2.1（已打包）
-status: 0.2.1 已打包并发布 GitHub Release（自动更新链路已通）；39 项 + i18n + 设置页回归全 PASS
-next: 可选：代码签名（消除 SmartScreen 提示）
+version: 0.2.2（未打包）
+status: 0.2.1 已发布；0.2.2 完成性能与健壮性优化（结果页 43 项 + OCR 桥接健壮性测试全 PASS），未打包
+next: 如需分发：npm run dist 出 0.2.2 并上传 Release
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -16,8 +16,9 @@ derived_from: process/2026-10-19_process.log.md
 
 ## §0 一句话状态
 
-**设计稿已完整落地**：样式拆为 tokens/base/components/page 四层，结果页具备悬停/联动/选中/拖拽/禁用/加载/空状态/无原图八种状态与选区浮条，
-设置页接入同一套令牌与组件；`tests/test_result_ui.js` **39 项**、`tests/test_i18n_ui.js`、`tests/test_settings.js`、i18n 静态扫描全 PASS。
+**0.2.1 已发布**；0.2.2 完成「变慢」定位：美化只影响渲染 3ms（非瓶颈），真实耗时是 OCR 档位与截图。
+已把 UI 侧隐性等待清零（主进程阻塞 1s→0、结果窗 413ms→131ms），并补齐 OCR 超时/重试/坏图等边界；
+结果页 43 项、OCR 桥接健壮性 6 项、i18n 与设置页全 PASS。尚未打包。
 
 ## §1 关键结论
 
@@ -30,6 +31,8 @@ derived_from: process/2026-10-19_process.log.md
 | **K5** | 视觉层级原则：**全界面只有文本选区可用实色底**，其余用描边 / 色条 / ≤12% 淡底 | 现状 5 层蓝色互相抢戏 | `P-04`、`S1:181-196` |
 | **K6** | 样式可安全外链到 `styles/`：file:// 下同源 CSS 的 `cssRules` 可读，`::selection` 渲染与外链/内联无关（像素级一致） | 两轮探针 | `P-11` |
 | **K7** | 隐藏窗口（`show:false`）会暂停 rAF、延迟 `setContentSize` 传播；**产品侧真实存在「窗口被遮挡时选区计数不更新」**，已加 120ms 兜底 | 对照组实测 | `P-11` |
+| **K8** | **美化没有拖慢渲染**：同一份数据 A/B，结果页 `items` 28ms → 31ms，`load` 564ms → 561ms。真实耗时在 OCR 引擎（accurate 2–4.5s）与截图（0.7–1.0s） | A/B 实测 + 运行日志 | `P-15` |
+| **K9** | 0.2.1 里两处「UI 侧隐性等待」：主进程同步读 DPI 阻塞 **750–1065ms**；结果窗口在 OCR 完成后才创建，还要再加 **413ms** 加载 | 心跳 + 窗口基准 | `P-15` |
 
 ## §2 决策（含被否方案）
 
@@ -47,6 +50,9 @@ derived_from: process/2026-10-19_process.log.md
 | **D10** | 加载态用**两栏骨架**而非 spinner | 结构与真实内容同形，数据到达不跳布局；spinner 会闪一下 | 居中转圈 / 纯文本"加载中" | `P-11` |
 | **D11** | 空状态加图标与提示，但 `.empty` 的 `textContent` 保持**精确等于**原文案 | `tests/test_i18n_ui.js` 用精确值断言空状态文案 | 把提示写进 `.empty` | `S3`、`P-11` |
 | **D12** | 浮条默认贴选区**下方**，放不下才翻上方，并夹在内容区内 | 盖住"接下来要读的行"比盖住已选中的行影响小；不遮工具栏 | 固定上方（会压住选中行或工具栏） | `P-11` |
+| **D13** | 主进程读系统 DPI 改 **`execFile` 异步 + 启动预热** | 同步调用把事件循环冻住 1s，期间所有 IPC 排队 | 保留 `execSync`（简单但每次首窗卡 1s） | `K9`、`P-15` |
+| **D14** | 结果窗口在 **OCR 开始时预建（`show:false`）**，`ready-to-show` 再显示 | 页面加载与识别并行，省 413ms 且无白屏；`result:get` 用 `{pending}` 区分「还没来」 | 等 OCR 完成再建窗（现状） | `K9`、`P-15` |
+| **D15** | OCR 未完成时 `result:get` 返回 **`{pending:true}`**，渲染层保持骨架 | 不能把「还没来」误判成「没识别到文字」 | 返回 `null`（会闪空状态） | `P-15` |
 
 ## §3 未完成事项（按优先级）
 
@@ -61,6 +67,8 @@ derived_from: process/2026-10-19_process.log.md
 | **T7** | 加载 / 空状态 / 无原图 / 禁用等边界态 | **已完成（P-11）** | T1 | `result.js` ≈90 行、`components.css` | 骨架→内容无跳动；`aria-busy` 复位 |
 | **T8** | 设置页接入同一令牌与组件层 | **已完成（P-11）** | D9 | `settings.html` + `settings.css` | 540/440 宽无横向溢出；中英不破版 |
 | **T9** | 打包发布 0.2.1 | **已完成（P-12/P-13）** | T1–T8 | `package.json`、`electron-builder.yml`、`dist/`、GitHub Release | 源码 `e213880` 已推；资产 3 个上传；latest → v0.2.1 |
+| **T10** | **性能定位与健壮性（0.2.2）** | **已完成（P-15）** | T1–T9 | `index.js`、`ocr-bridge.js`、`result.js`、`overlay.*`、i18n | 主进程阻塞归零；窗口 413→131ms；超时/重试/坏图全测 |
+| **T11** | 打包发布 0.2.2 | 未开始（可选） | T10 | `dist/`、Release | `npm run dist` + 上传三个资产 |
 
 > 风险最高的是 T1：编辑、复制全文、多屏分组、连续截图刷新都要回归。建议单独提交 + 打 tag。
 
@@ -77,6 +85,8 @@ derived_from: process/2026-10-19_process.log.md
 | **C7** | 样式分层不改变既有选择器名（`.toolbar/.item/.box/.editor/.text-panel/.img-panel/.empty/#status` 全保留）；新组件用扁平 kebab（`.btn-ghost`），状态用 `is-*`（`.is-count/.is-selecting/.is-done/.is-loading`）。 |
 | **C8** | 页面通过 `<link>` 引 `styles/*.css`，**不要再复制一份内联样式**；`npm run demo:html` 会自动把 link 内联进 `docs/result-demo.html`。 |
 | **C9** | 测试里的窗口尺寸断言必须**轮询等待**媒体查询生效（`waitFor`），不能用固定 `sleep`：隐藏窗口下 resize 传播是异步的。 |
+| **C10** | **主进程禁止同步调用外部进程**（`execSync`）：一次 PowerShell 就要 0.75–1.1s，会把 IPC 全卡住。外部命令一律 `execFile` + 超时 + 缓存。 |
+| **C11** | OCR 侧超时约定：ready 25s、单请求 90s（`SCREEN_OCR_READY_TIMEOUT` / `SCREEN_OCR_REQUEST_TIMEOUT` 仅供测试覆盖）；只在进程退出类错误上重启重试一次，超时不重试。 |
 
 ## §5 产物索引
 
@@ -88,8 +98,8 @@ derived_from: process/2026-10-19_process.log.md
 | **F4** | `context/final/FINAL_selection-ui-preview_v1.html` | 16,038 B | **冻结** |
 | **F5** | `context/process/2026-10-19_process.log.md` | 21,121 B | 只追加，含原始命令输出（P-01…P-11） |
 | **F6** | `src/renderer/result.html` | 1,185 B / 24 行 | 已改：只剩结构，样式走 `<link>` |
-| **F7** | `src/renderer/result.js` | 24,315 B / 671 行 | 已改：骨架/空状态/占位/浮条/兜底定时器 |
-| **F8** | `tests/test_result_ui.js` | 16,237 B / 313 行 | 已改：**39 项**断言 |
+| **F7** | `src/renderer/result.js` | 25,835 B / 703 行 | 已改：骨架/空状态/占位/浮条/兜底定时器/pending/坏图回退 |
+| **F8** | `tests/test_result_ui.js` | 17,943 B / 341 行 | 已改：**43 项**断言 |
 | **F9** | `docs/screenshots/design-*.png` | 8 张 | 本轮效果留档（宽/选中/加载/空/窄/720/设置 540/设置 440 EN） |
 | **F10** | `dist/screen-ocr-setup-0.2.1.exe`、`dist/截屏OCR-0.2.1-win.zip`、`dist/latest.yml`、`dist/SHA256SUMS-0.2.1.txt` | 175 MB / 224 MB / 349 B | **0.2.1 分发产物**；清单 url 与文件名一致 |
 | **F11** | `src/renderer/styles/tokens.css` | 2,795 B / 87 行 | 新建：令牌单一来源 |
@@ -98,7 +108,9 @@ derived_from: process/2026-10-19_process.log.md
 | **F14** | `src/renderer/styles/result.css` | 9,521 B / 396 行 | 新建：结果页布局与响应式 |
 | **F15** | `src/renderer/styles/settings.css` | 7,036 B / 298 行 | 新建：设置页布局 |
 | **F16** | `src/renderer/settings.html` | 6,370 B / 164 行 | 已改：接入令牌/组件，布局改弹性 |
-| **F17** | `docs/result-demo.html` | 67,850 B | 自动生成（`npm run demo:html`），演示页可独立打开 |
+| **F17** | `docs/result-demo.html` | 69,685 B | 自动生成（`npm run demo:html`），演示页可独立打开 |
+| **F18** | `src/main/index.js` / `src/main/ocr-bridge.js` | 27,890 B / 7,816 B | 0.2.2：DPI 异步、结果窗预建、OCR 直传与超时重试 |
+| **F19** | `tests/test_ocr_bridge_resilience.js` + `tests/fixtures/fake-ocr-server.js` | 3,345 B / 1,343 B | 新增：假 sidecar 验证超时/重试/脏输出/空输入 |
 
 ## §6 关联关系
 
@@ -136,10 +148,13 @@ derived_from: process/2026-10-19_process.log.md
 ```
 项目：screen-ocr（Electron 截屏 OCR）。
 先读 screen-ocr/context/CONTEXT_DIGEST.md。
-T1–T8 已完成：结果页单一编辑根（.text-panel > .editor[contenteditable] > .item）、八种状态、选区浮条，
-样式分层在 src/renderer/styles/{tokens,base,components}.css + {result,settings}.css。
+T1–T10 已完成：结果页单一编辑根、八状态、选区浮条、样式分层（styles/）；
+0.2.2 还做完了性能与健壮性：主进程禁止同步 execSync、结果窗 OCR 期预建、result:get 用 {pending} 保骨架、
+OCR ready 25s/请求 90s 超时 + 崩溃重试一次。
 动代码前先跑（必须传 --no-sandbox；脚本含 Electron 时用 env -u ELECTRON_RUN_AS_NODE）：
-  tests/test_result_ui.js（39 项）+ tests/test_i18n_ui.js + tests/test_settings.js + node tests/test_i18n_scan.js。
+  npm test（i18n 词典/扫描/裁剪数学）
+  node tests/test_ocr_bridge_resilience.js
+  tests/test_result_ui.js（43 项）+ tests/test_i18n_ui.js + tests/test_settings.js
 约束：不要改回逐行 contentEditable；不引入 npm 依赖；--sel-bg 保持字面 hex；
       .empty 的 textContent 必须精确等于 i18n 原文案；窗口尺寸断言用 waitFor 轮询。
 ```
