@@ -31,9 +31,9 @@ fs.writeFileSync(path.join(USER_DATA, 'settings.json'), JSON.stringify({
 }, null, 2), 'utf8')
 
 process.env.SCREEN_OCR_PYTHON = 'C:/Users/Lenovo/.workbuddy/binaries/python/envs/ocr/Scripts/python.exe'
-require('./src/main/index.js')
+require('../src/main/index.js')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 let failed = 0

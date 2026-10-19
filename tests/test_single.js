@@ -10,7 +10,7 @@ process.env.SCREEN_OCR_PYTHON =
 // 与 electron . 的 "screen-ocr" 不同会导致单实例锁文件不同、测试失真）
 app.setPath('userData', require('path').join(app.getPath('appData'), 'screen-ocr'))
 
-require('./src/main/index.js') // 本进程 = 主实例
+require('../src/main/index.js') // 本进程 = 主实例
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -19,7 +19,7 @@ app.whenReady().then(async () => {
     await sleep(1200)
     // 启动第二实例（electron + 主入口），应被单实例锁立即终止
     const child = spawn(process.execPath, ['--no-sandbox', '--disable-gpu', '--in-process-gpu', '.'],
-      { cwd: path.join(__dirname), env: { ...process.env } })
+      { cwd: path.join(__dirname, '..'), env: { ...process.env } })
     let out = ''
     child.stdout.on('data', (d) => { out += d })
     child.stderr.on('data', (d) => { out += d })

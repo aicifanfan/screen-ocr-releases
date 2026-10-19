@@ -12,12 +12,12 @@ import importlib.util
 
 from PIL import Image, ImageDraw, ImageFont
 
-SERVERS = [sys.executable, os.path.join(os.path.dirname(__file__), 'python', 'ocr_server.py')]
+SERVERS = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'python', 'ocr_server.py')]
 
 
 def load_postprocess():
     spec = importlib.util.spec_from_file_location(
-        'ocr_server', os.path.join(os.path.dirname(__file__), 'python', 'ocr_server.py'))
+        'ocr_server', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'python', 'ocr_server.py'))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.postprocess_text

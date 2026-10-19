@@ -3,7 +3,7 @@
 import subprocess, json, base64, io, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXE = os.path.join(HERE, 'python', 'ocr_pkg', 'ocr_server', 'ocr_server.exe')
 
 

@@ -2,11 +2,11 @@
 const { app } = require('electron')
 
 const modules = [
-  './src/main/screen-capture',
-  './src/main/ocr-bridge',
-  './src/main/shortcut',
-  './src/main/tray',
-  './src/main/clipboard'
+  '../src/main/screen-capture',
+  '../src/main/ocr-bridge',
+  '../src/main/shortcut',
+  '../src/main/tray',
+  '../src/main/clipboard'
 ]
 
 app.whenReady().then(() => {

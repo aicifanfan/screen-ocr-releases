@@ -1,7 +1,7 @@
 // Step 5 端到端自检：多屏截图 → 裁剪（模拟渲染进程选区）→ OCR
 const { app, nativeImage } = require('electron')
-const { captureAllScreens } = require('./src/main/screen-capture')
-const { OcrBridge } = require('./src/main/ocr-bridge')
+const { captureAllScreens } = require('../src/main/screen-capture')
+const { OcrBridge } = require('../src/main/ocr-bridge')
 
 app.disableHardwareAcceleration() // 禁用 GPU，避免无 GPU 环境崩溃
 app.commandLine.appendSwitch('disable-gpu')

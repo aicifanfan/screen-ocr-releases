@@ -1,6 +1,6 @@
 // 截图自检：验证多屏捕获 + 虚拟桌面计算 + 混合 DPI（每屏 scaleFactor）+ 屏标识字段
 const { app } = require('electron')
-const { captureAllScreens } = require('./src/main/screen-capture')
+const { captureAllScreens } = require('../src/main/screen-capture')
 
 app.whenReady().then(async () => {
   try {

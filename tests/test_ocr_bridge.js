@@ -2,13 +2,13 @@
 // 运行：node test_ocr_bridge.js
 const fs = require('fs')
 const path = require('path')
-const { OcrBridge } = require('./src/main/ocr-bridge')
+const { OcrBridge } = require('../src/main/ocr-bridge')
 
 // 指向安装目录的打包产物（模拟 process.resourcesPath）
 process.resourcesPath = 'C:/Users/Lenovo/AppData/Local/Programs/screen-ocr/resources'
 
-const IMG = path.join(__dirname, 'python', 'bench_images', 'cn_small_15.png')
-const IMG2 = path.join(__dirname, 'python', 'bench_images', 'symbols_18.png')
+const IMG = path.join(__dirname, '..', 'python', 'bench_images', 'cn_small_15.png')
+const IMG2 = path.join(__dirname, '..', 'python', 'bench_images', 'symbols_18.png')
 
 async function main() {
   if (!fs.existsSync(IMG)) { console.log('[FAIL] 测试图片不存在:', IMG); process.exit(1) }

@@ -9,8 +9,8 @@ const path = require('path')
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
-const OVERLAY = path.join(__dirname, 'src', 'renderer', 'overlay.html')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
+const OVERLAY = path.join(__dirname, '..', 'src', 'renderer', 'overlay.html')
 
 app.whenReady().then(async () => {
   try {

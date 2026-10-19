@@ -1,6 +1,6 @@
 // 纯逻辑单测：快捷键 accelerator 生成与显示（无需 GUI，普通 Node 即可运行）
 // 运行：node test_accelerator.js
-const { keyEventToAccelerator, acceleratorToDisplay } = require('./src/renderer/accelerator.js')
+const { keyEventToAccelerator, acceleratorToDisplay } = require('../src/renderer/accelerator.js')
 
 let fails = 0
 function eq(name, actual, expect) {

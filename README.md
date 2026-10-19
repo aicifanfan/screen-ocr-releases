@@ -66,15 +66,15 @@ src/shared/i18n.js      # 唯一文案来源：zh/en 词典 + t() + applyDom()�
 - 语言变更由主进程 `i18n:set` 持久化后广播 `i18n:changed`，各窗口就地重绘；
 - 屏名等**运行时数据不存文案**，只传 `labelKind/labelIndex`，由渲染层按当前语言生成。
 
-**新增一门语言**：在 `src/shared/i18n.js` 的 `MESSAGES` 增加一份同 key 词典，并把语言代码加进 `LANGS` / `ALIASES`，改 `normalizeLang` 的映射即可；`test_i18n.js` 会校验 key 与占位符是否对齐。
+**新增一门语言**：在 `src/shared/i18n.js` 的 `MESSAGES` 增加一份同 key 词典，并把语言代码加进 `LANGS` / `ALIASES`，改 `normalizeLang` 的映射即可；`tests/test_i18n.js` 会校验 key 与占位符是否对齐。
 
 **防止漏译的三道测试**：
 
 ```bash
-node test_i18n.js         # 词典完整性、占位符一致性、语言解析与回退
-node test_i18n_scan.js    # 扫描 src/：硬编码中文残留 + 引用了不存在的 key
-npx electron test_i18n_ui.js    # 真实渲染：切换语言、无中文残留、长文案不撑破布局
-npx electron test_i18n_main.js  # 主进程链路：配置→preload→切换→持久化→广播
+node tests/test_i18n.js         # 词典完整性、占位符一致性、语言解析与回退
+node tests/test_i18n_scan.js    # 扫描 src/：硬编码中文残留 + 引用了不存在的 key
+npx electron tests/test_i18n_ui.js    # 真实渲染：切换语言、无中文残留、长文案不撑破布局
+npx electron tests/test_i18n_main.js  # 主进程链路：配置→preload→切换→持久化→广播
 ```
 
 ## 常见问题
@@ -91,43 +91,60 @@ npx electron test_i18n_main.js  # 主进程链路：配置→preload→切换→
 
 ## 自测脚本
 
+脚本统一放在 `tests/`；两条常用命令：
+
+```bash
+npm test          # 纯 Node/静态检查（i18n 词典、硬编码扫描、裁剪数学）
+npm run test:ui   # Electron 渲染类（结果页 39 项、中英切换、设置页）
+```
+
+需要单跑某一项时：
+
 ```bash
 # Python OCR 单点测试（符号规范化 + 中文识别，需在有 rapidocr 依赖的环境运行）
-python test_ocr.py
+python tests/test_ocr.py
 
 # Electron 系列自检（需 unset ELECTRON_RUN_AS_NODE）
 unset ELECTRON_RUN_AS_NODE
-npx electron test_launch.js       # 模块加载
-npx electron test_capture.js      # 多屏捕获 + 混合 DPI 字段 + 屏标识
-npx electron test_capture_jpeg.js # JPEG 捕获 → 解码 → 像素有效 + 前后基准对比
-npx electron test_e2e.js          # 多屏截图→裁剪→OCR 全链路
-npx electron test_overlay.js      # 遮罩混合 DPI 合成 + 单屏/跨屏裁剪（像素级校验）
-npx electron test_clipmask.js     # clip-path 单遮罩挖洞
-npx electron test_overlay_full.js # 完整启动诊断：每块屏是否都被遮罩覆盖
-npx electron test_overlay_fresh.js# 每次截屏都是全新窗口（无嵌套/叠加）
-npx electron test_result.js       # 结果页多屏分组渲染 + 双向联动
-npx electron test_copy.js         # 复制交互（复制/连续刷新/全选/自动关闭）
-npx electron test_settings.js     # 设置页（快捷键录制/缩放/更新/语言入口）
-npx electron test_single.js       # 单实例锁 + 二次启动唤起截屏
-npx electron test_tray.js         # 托盘图标加载
-npx electron test_ocr_bridge.js   # Node → 打包 exe 的 OCR 协议链路
-npx electron test_i18n_ui.js      # 中英切换（无刷新、无残留、布局不溢出）
-npx electron test_i18n_main.js    # 语言持久化与广播链路
+npx electron tests/test_launch.js       # 模块加载
+npx electron tests/test_capture.js      # 多屏捕获 + 混合 DPI 字段 + 屏标识
+npx electron tests/test_capture_jpeg.js # JPEG 捕获 → 解码 → 像素有效 + 前后基准对比
+npx electron tests/test_e2e.js          # 多屏截图→裁剪→OCR 全链路
+npx electron tests/test_overlay.js      # 遮罩混合 DPI 合成 + 单屏/跨屏裁剪（像素级校验）
+npx electron tests/test_clipmask.js     # clip-path 单遮罩挖洞
+npx electron tests/test_overlay_full.js # 完整启动诊断：每块屏是否都被遮罩覆盖
+npx electron tests/test_overlay_fresh.js# 每次截屏都是全新窗口（无嵌套/叠加）
+npx electron tests/test_result.js       # 结果页多屏分组渲染 + 双向联动
+npx electron tests/test_copy.js         # 复制交互（复制/连续刷新/全选/自动关闭）
+npx electron tests/test_settings.js     # 设置页（快捷键录制/缩放/更新/语言入口）
+npx electron tests/test_single.js       # 单实例锁 + 二次启动唤起截屏
+npx electron tests/test_tray.js         # 托盘图标加载
+npx electron tests/test_ocr_bridge.js   # Node → 打包 exe 的 OCR 协议链路
+npx electron tests/test_i18n_ui.js      # 中英切换（无刷新、无残留、布局不溢出）
+npx electron tests/test_i18n_main.js    # 语言持久化与广播链路
 ```
 
 > **受限/无 GPU 环境（如 CI、WorkBuddy 沙箱）**：运行窗口渲染类自检（`test_overlay.js`）时加 `--no-sandbox --disable-gpu`，例如：
-> `npx electron --no-sandbox --disable-gpu test_overlay.js`。真实桌面机上直接 `npm start` 即可，无需任何额外参数。
+> `npx electron --no-sandbox --disable-gpu tests/test_overlay.js`。真实桌面机上直接 `npm start` 即可，无需任何额外参数。
 
 ## 目录结构
 
 ```
 screen-ocr/
-├── python/ocr_server.py     # Python OCR 服务（stdio JSON）
 ├── src/
-│   ├── main/                # 主进程：入口/快捷键/托盘/截屏/OCR桥接/剪贴板
-│   ├── preload/index.js     # contextBridge 安全桥接
-│   └── renderer/            # 渲染进程：遮罩选区页 + 结果文本页
-└── electron-builder.yml     # 打包配置
+│   ├── main/              # 主进程：入口 / 快捷键 / 托盘 / 截屏 / OCR 桥接 / 自动更新
+│   ├── preload/           # contextBridge 安全桥接
+│   ├── renderer/          # 渲染层：遮罩选区页、结果页、设置页
+│   │   └── styles/        # tokens / base / components + 页面样式
+│   └── shared/            # 主/渲染共用：i18n 词典
+├── python/                # OCR sidecar 源码（ocr_server.py）
+├── assets/                # 图标、安装脚本（installer.nsh）
+├── scripts/               # 构建辅助（build-demo.js 生成演示页）
+├── tests/                 # 自测脚本（Electron / Node / Python）
+├── docs/                  # 设计与说明：改造方案、静态预览、演示页、截图、跑通与打包指南
+├── context/               # 上下文归档：精简摘要、过程日志、冻结版本
+├── electron-builder.yml   # 打包配置
+└── package.json
 ```
 
 ## 打包发布

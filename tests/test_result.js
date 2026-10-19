@@ -5,8 +5,8 @@ const path = require('path')
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
-const RESULT = path.join(__dirname, 'src', 'renderer', 'result.html')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
+const RESULT = path.join(__dirname, '..', 'src', 'renderer', 'result.html')
 
 let currentResult = null
 let copiedText = null

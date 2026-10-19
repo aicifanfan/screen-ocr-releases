@@ -16,7 +16,7 @@ function eq(name, actual, expect) {
 
 app.whenReady().then(() => {
   try {
-    const { getAll, get, set, update, DEFAULTS } = require('./src/main/config')
+    const { getAll, get, set, update, DEFAULTS } = require('../src/main/config')
 
     // 默认值
     eq('默认 shortcut', get('shortcut'), DEFAULTS.shortcut)

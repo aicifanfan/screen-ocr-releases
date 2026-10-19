@@ -10,7 +10,7 @@ process.env.SCREEN_OCR_PYTHON =
 // 独立 userData：避免与其它测试/安装版实例抢单实例锁（否则会静默退出、无输出）
 app.setPath('userData', require('path').join(app.getPath('appData'), 'screen-ocr-test-fresh'))
 
-require('./src/main/index.js')
+require('../src/main/index.js')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

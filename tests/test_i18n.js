@@ -1,6 +1,6 @@
 // i18n 词典与解析逻辑单测（纯 Node，无需 Electron）
 // 运行：node test_i18n.js
-const I18n = require('./src/shared/i18n')
+const I18n = require('../src/shared/i18n')
 
 let failed = 0
 function check(name, cond, detail) {

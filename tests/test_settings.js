@@ -6,8 +6,8 @@ const path = require('path')
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
-const SETTINGS = path.join(__dirname, 'src', 'renderer', 'settings.html')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
+const SETTINGS = path.join(__dirname, '..', 'src', 'renderer', 'settings.html')
 
 // mock 主进程设置 IPC（测试进程不加载 index.js）
 ipcMain.handle('i18n:set', (_e, language) => ({ ok: true, lang: language === 'en' ? 'en' : 'zh', setting: language }))

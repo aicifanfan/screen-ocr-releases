@@ -8,9 +8,9 @@
 //   3. JS 里 t('key') / tr('key') 形式的字面量 key 必须存在于词典。
 const fs = require('fs')
 const path = require('path')
-const I18n = require('./src/shared/i18n')
+const I18n = require('../src/shared/i18n')
 
-const ROOT = path.join(__dirname, 'src')
+const ROOT = path.join(__dirname, '..', 'src')
 const DICT_FILE = path.join(ROOT, 'shared', 'i18n.js')
 const LOG_IMPL = path.join(ROOT, 'main', 'log.js') // 日志实现本身，只有诊断文本
 const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
@@ -97,7 +97,7 @@ let scanned = 0
 for (const file of files) {
   if (path.resolve(file) === path.resolve(DICT_FILE)) continue // 词典本身就是文案来源
   if (path.resolve(file) === path.resolve(LOG_IMPL)) continue // 日志实现只有诊断文本
-  const rel = path.relative(__dirname, file)
+  const rel = path.relative(path.join(__dirname, '..'), file)
   const raw = fs.readFileSync(file, 'utf8')
   const isHtml = file.endsWith('.html')
   const body = isHtml

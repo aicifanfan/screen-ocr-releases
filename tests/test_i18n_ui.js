@@ -7,9 +7,9 @@ const path = require('path')
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
-const SETTINGS = path.join(__dirname, 'src', 'renderer', 'settings.html')
-const RESULT = path.join(__dirname, 'src', 'renderer', 'result.html')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
+const SETTINGS = path.join(__dirname, '..', 'src', 'renderer', 'settings.html')
+const RESULT = path.join(__dirname, '..', 'src', 'renderer', 'result.html')
 
 const CJK = /[\u4e00-\u9fff]/
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

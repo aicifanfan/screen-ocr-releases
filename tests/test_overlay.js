@@ -7,8 +7,8 @@ app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('in-process-gpu')
 
-const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
-const OVERLAY = path.join(__dirname, 'src', 'renderer', 'overlay.html')
+const PRELOAD = path.join(__dirname, '..', 'src', 'preload', 'index.js')
+const OVERLAY = path.join(__dirname, '..', 'src', 'renderer', 'overlay.html')
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({

@@ -6,7 +6,7 @@ const { app, BrowserWindow, screen } = require('electron')
 process.env.SCREEN_OCR_PYTHON =
   'C:/Users/Lenovo/.workbuddy/binaries/python/envs/ocr/Scripts/python.exe'
 
-require('./src/main/index.js')
+require('../src/main/index.js')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

@@ -1,6 +1,6 @@
 // 纯逻辑单测：裁剪坐标计算（无需 GUI，普通 Node 即可运行）
 // 运行：node test_crop_math.js
-const { computeCrop } = require('./src/renderer/crop-math.js')
+const { computeCrop } = require('../src/renderer/crop-math.js')
 
 // 模拟 force=1 下两块屏：主屏 (0,0,2560,1600)，副屏 (-2560,0,2560,1600)
 const displays = [

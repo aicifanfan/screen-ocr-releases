@@ -1,12 +1,12 @@
 // 托盘图标修复测试：验证 tray.png/tray16.png 可加载、Tray 创建成功且图标非空
 const { app, nativeImage } = require('electron')
 const path = require('path')
-const { createTray } = require('./src/main/tray')
+const { createTray } = require('../src/main/tray')
 
 app.whenReady().then(() => {
   try {
-    const icon16 = nativeImage.createFromPath(path.join(__dirname, 'src', 'assets', 'tray16.png'))
-    const icon32 = nativeImage.createFromPath(path.join(__dirname, 'src', 'assets', 'tray.png'))
+    const icon16 = nativeImage.createFromPath(path.join(__dirname, '..', 'src', 'assets', 'tray16.png'))
+    const icon32 = nativeImage.createFromPath(path.join(__dirname, '..', 'src', 'assets', 'tray.png'))
     console.log('[OK] tray16 非空:', !icon16.isEmpty(), '尺寸', JSON.stringify(icon16.getSize()))
     console.log('[OK] tray   非空:', !icon32.isEmpty(), '尺寸', JSON.stringify(icon32.getSize()))
 

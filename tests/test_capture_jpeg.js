@@ -9,7 +9,7 @@ app.commandLine.appendSwitch('disable-gpu')
 
 app.whenReady().then(async () => {
   try {
-    const { captureAllScreens } = require('./src/main/screen-capture')
+    const { captureAllScreens } = require('../src/main/screen-capture')
     const cap = await captureAllScreens()
     const d = cap.displays[0]
     console.log('[OK] 捕获屏数:', cap.displays.length)
