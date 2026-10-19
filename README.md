@@ -92,12 +92,36 @@ pip install pyinstaller
 npm run build-py
 # 产物：python/ocr_pkg/ocr_server/ocr_server.exe（+ _internal/ 依赖目录）
 
-# 3. 打 Electron 安装包
+# 3. 打 Windows 产物（安装包 + 免安装 zip）
 npm run dist
-# 产物：dist/截屏OCR Setup xxx.exe
+# 产物：
+#   dist/截屏OCR Setup <version>.exe   安装包（安装时可勾选是否创建桌面快捷方式）
+#   dist/截屏OCR-<version>-win.zip     免安装压缩包：解压后双击 截屏OCR.exe 即可运行
 ```
 
 > `electron-builder.yml` 会把整个 `python/ocr_pkg/ocr_server/` 目录作为 extraResources 带入，主进程运行时从 `process.resourcesPath/ocr_server/ocr_server.exe` 启动 sidecar。
+
+### 安装选项：创建桌面快捷方式
+
+安装包为「辅助安装」模式（`oneClick: false`），在「选择安装位置」之后会多出一页
+**「选择附加任务」**，其中「创建桌面快捷方式」**默认勾选**，用户可在安装过程中自行取消或重新勾选。
+
+| 场景 | 行为 |
+|---|---|
+| 勾选（默认） | 创建桌面快捷方式 + 开始菜单快捷方式 |
+| 取消勾选 | 不创建桌面快捷方式，仍保留开始菜单项 |
+| 静默安装 `安装包.exe /S` | 不显示页面，按「勾选」处理 |
+| 覆盖安装 / 自动更新 | 跳过该页，不改变已有快捷方式状态 |
+
+实现：`nsis.include: assets/installer.nsh`（自定义页面 + `customInstall` 钩子），
+配合 `nsis.createDesktopShortcut: true` 由内置流程创建，若用户取消则删除刚创建的 `.lnk`。
+注意脚本必须保存为 **UTF-8 with BOM**，否则中文会乱码；electron-builder 编译时已固定 `-INPUTCHARSET UTF8`。
+
+### 分享用的 zip
+
+`win.target` 同时包含 `nsis` 与 `zip`，zip 是 `win-unpacked` 目录的压缩包：
+接收者解压后直接双击 `截屏OCR.exe` 即可使用，无需安装、无需管理员权限，
+但不会创建快捷方式（需要的话自行发送到桌面）。
 
 ### 打包关键注意事项
 

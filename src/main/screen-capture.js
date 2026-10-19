@@ -1,6 +1,20 @@
 // 屏幕捕获：多显示器 + 统一物理坐标（force-device-scale-factor=1）
 const { desktopCapturer, screen } = require('electron')
 
+// JPEG 替代 PNG：PNG 编码 CPU 密集且同步阻塞，JPEG 编码快 3~10 倍、体积小 5~10 倍。
+// 屏幕截图不透明（无 alpha），JPEG quality 92 对文字识别几乎无损。
+const JPEG_QUALITY = 92
+
+function toJpegDataUrl(image) {
+  try {
+    const buf = image.toJPEG(JPEG_QUALITY)
+    if (buf && buf.length) return 'data:image/jpeg;base64,' + buf.toString('base64')
+  } catch (e) {
+    console.warn('[capture] toJPEG 失败，回退 PNG：', e && e.message)
+  }
+  return image.toDataURL() // 兜底：极端情况下仍保证可用
+}
+
 /**
  * 捕获所有显示器，返回各自截图与虚拟桌面边界。
  *
@@ -70,7 +84,7 @@ async function captureAllScreens() {
     if (!source) continue
 
     out.push({
-      dataUrl: source.thumbnail.toDataURL(),
+      dataUrl: toJpegDataUrl(source.thumbnail),
       x: bounds.x,
       y: bounds.y,
       width: bounds.width,   // DIP

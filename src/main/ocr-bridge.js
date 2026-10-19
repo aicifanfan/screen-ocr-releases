@@ -4,9 +4,10 @@ const path = require('path')
 const fs = require('fs')
 
 class OcrBridge {
-  constructor() {
+  constructor(profile) {
     this.proc = null
     this.ready = false
+    this.profile = profile || 'balanced' // fast / balanced / accurate
     this.pending = new Map() // seq -> { resolve, reject }
     this.seq = 0
     this._readyResolve = null
@@ -27,7 +28,11 @@ class OcrBridge {
     if (this.proc) return this._waitReady()
     const { cmd, args } = this._resolvePython()
 
-    this.proc = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    this.proc = spawn(cmd, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // 通过环境变量把识别档位传给 sidecar（balanced 为默认，速度/精度均衡）
+      env: { ...process.env, SCREEN_OCR_PROFILE: this.profile }
+    })
 
     this.proc.stderr.on('data', (d) => console.error('[ocr:stderr]', d.toString().trim()))
     this.proc.on('error', (e) => console.error('[ocr] 启动失败：', e.message))
@@ -86,11 +91,25 @@ class OcrBridge {
     })
   }
 
-  /** 识别一张图片（PNG Buffer），返回 { texts, boxes, scores } */
+  /** 识别一张图片（PNG Buffer），返回 { texts, boxes, scores, elapse_ms } */
   async recognize(imageBuffer) {
     await this.init()
     const b64 = imageBuffer.toString('base64')
     return this._send({ type: 'recognize', image: b64 })
+  }
+
+  /** 运行时切换识别档位（fast / balanced / accurate），无需重启 sidecar */
+  async setProfile(profile) {
+    const p = String(profile || '').trim().toLowerCase()
+    if (!['fast', 'balanced', 'accurate'].includes(p) || p === this.profile) return false
+    this.profile = p
+    if (!this.proc) return true // 尚未启动：下次 init 会用新档位
+    try {
+      await this._send({ type: 'setProfile', profile: p })
+      return true
+    } catch {
+      return false
+    }
   }
 
   close() {

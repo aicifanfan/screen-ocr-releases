@@ -12,7 +12,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 app.whenReady().then(async () => {
   try {
-    // 等自动截屏(onCapture) 完成：为每块屏创建一个遮罩窗口
+    // 启动后不再自动截屏 → 显式触发一次（等价于用户按快捷键 / 再次双击图标）
+    app.emit('second-instance')
+
+    // 等 onCapture 完成：为每块屏创建一个遮罩窗口
     let overlays = []
     for (let i = 0; i < 60 && overlays.length === 0; i++) {
       await sleep(200)

@@ -22,3 +22,9 @@ build/
 *.spec
 debug_meta.py
 debug_rec.py
+
+# 可再生成的产物（不要提交）
+# OCR 基准测试图，由 python/bench_ocr.py 自动生成
+python/bench_images/
+# 上一版 ocr_server 打包备份（约 400MB）
+python/ocr_pkg_backup/

@@ -13,7 +13,7 @@ app.whenReady().then(async () => {
         '  - ' + (d.label || '?') +
         ' @(' + d.x + ',' + d.y + ') ' + d.width + 'x' + d.height +
         ' sf=' + d.scaleFactor + ' 物理=' + d.pxWidth + 'x' + d.pxHeight +
-        ' isPrimary=' + d.isPrimary + ' dataUrl长度 ' + d.dataUrl.length
+        ' isPrimary=' + d.isPrimary + ' [' + d.dataUrl.slice(0, 16) + '…] 长度 ' + d.dataUrl.length
       )
     }
 
@@ -22,7 +22,8 @@ app.whenReady().then(async () => {
       cap.virtual.width > 0 &&
       cap.virtual.height > 0 &&
       cap.primaryScaleFactor >= 1 &&
-      cap.displays.every((d) => typeof d.dataUrl === 'string' && d.dataUrl.startsWith('data:image/png'))
+      // 优先 JPEG（性能优化）；兜底允许 PNG
+      cap.displays.every((d) => typeof d.dataUrl === 'string' && /^data:image\/(jpeg|png)/.test(d.dataUrl))
 
     // 每屏独立 scaleFactor + 物理尺寸一致性
     const dpiOk = cap.displays.every((d) => {

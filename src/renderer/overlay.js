@@ -8,17 +8,42 @@ let displays = []   // 每屏 { dataUrl, physX, physY, pxWidth, pxHeight, label,
 let originX = 0     // 本窗口左上角的全局物理 X
 let originY = 0     // 本窗口左上角的全局物理 Y
 let myIndex = -1
+let screensReady = false   // 截图数据是否已就绪（「先出遮罩后填图」下，mouseup 需等待）
+let readyResolve = null
 
 const stage = document.getElementById('stage')
 const screensEl = document.getElementById('screens')
 const sel = document.getElementById('sel')
 const tip = document.getElementById('size-tip')
+const maskHole = document.getElementById('mask')
 const mTop = document.getElementById('mask-top')
 const mBottom = document.getElementById('mask-bottom')
 const mLeft = document.getElementById('mask-left')
 const mRight = document.getElementById('mask-right')
 const mag = document.getElementById('mag')
 const magCtx = mag.getContext('2d')
+
+// clip-path polygon(evenodd) 特性检测：支持则用「单遮罩挖洞」，否则回退到 4 个 div 方案
+const CLIP_OK = (() => {
+  try { return CSS.supports('clip-path', 'polygon(evenodd, 0 0, 1px 0, 1px 1px)') } catch { return false }
+})()
+
+// 生成「外框 + 内框」的 evenodd 多边形（内框挖洞）
+function holeClip(r, W, H) {
+  return 'polygon(evenodd, 0 0, ' + W + 'px 0, ' + W + 'px ' + H + 'px, 0 ' + H + 'px, 0 0, ' +
+    r.x + 'px ' + r.y + 'px, ' +
+    r.x + 'px ' + (r.y + r.height) + 'px, ' +
+    (r.x + r.width) + 'px ' + (r.y + r.height) + 'px, ' +
+    (r.x + r.width) + 'px ' + r.y + 'px, ' +
+    r.x + 'px ' + r.y + 'px)'
+}
+
+function hideLegacyMasks() {
+  mTop.style.display = 'none'
+  mBottom.style.display = 'none'
+  mLeft.style.display = 'none'
+  mRight.style.display = 'none'
+}
 
 const MAG_W = 150, MAG_H = 100, ZOOM = 3
 
@@ -36,6 +61,7 @@ function myW() { const d = displays[myIndex]; return d ? d.pxWidth : window.inne
 function myH() { const d = displays[myIndex]; return d ? d.pxHeight : window.innerHeight }
 
 window.api.onScreens(async (payload) => {
+  screensReady = false
   displays = (payload.displays || []).map((d) => ({ ...d }))
   myIndex = payload.myIndex
   const mine = displays[myIndex] || displays[0]
@@ -43,16 +69,47 @@ window.api.onScreens(async (payload) => {
   originY = mine.physY
   await buildScreens()
   fullMask()
+  screensReady = true
+  if (readyResolve) { readyResolve(); readyResolve = null }
 })
+
+// 遮罩预热：复用窗口已显示时，立即切到「全屏遮罩」态（不等待新截图）
+window.api.onPrepare(() => {
+  fullMask()
+})
+
+// 等待截图数据就绪（最多 timeout），避免用旧图/空 canvas 裁剪
+function waitScreensReady(timeout = 2500) {
+  if (screensReady) return Promise.resolve()
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { readyResolve = null; resolve() }, timeout)
+    readyResolve = () => { clearTimeout(t); resolve() }
+  })
+}
+
+// —— 选区渲染调度：合并到 requestAnimationFrame，每帧最多渲染一次 ——
+// 主进程 16ms 轮询广播 + mousemove 都可能高频触发，直接同步渲染会造成重复布局/重绘。
+let pendingRect = null
+let selectionRaf = 0
+
+function scheduleSelection(rect) {
+  pendingRect = rect
+  if (selectionRaf) return
+  selectionRaf = requestAnimationFrame(() => {
+    selectionRaf = 0
+    if (pendingRect) renderSelection(pendingRect)
+    else fullMask()
+  })
+}
 
 // 主进程广播的拖拽状态（跨屏同步渲染）
 window.api.onSync((payload) => {
-  if (!payload.drag) { fullMask(); return }
+  if (!payload.drag) { scheduleSelection(null); return }
   const r = normRect(
     { x: payload.drag.startX, y: payload.drag.startY },
     { x: payload.drag.curX, y: payload.drag.curY }
   )
-  renderSelection(r)
+  scheduleSelection(r)
 })
 
 // 每屏一张物理 canvas。只有本窗口覆盖的屏位于 (0,0)，其余屏的 canvas 在视口外（仅用于跨屏裁剪）。
@@ -83,11 +140,18 @@ function setMask(el, left, top, width, height) {
 
 // 整窗半透明遮罩（无选区）
 function fullMask() {
-  const W = myW(), H = myH()
-  setMask(mTop, 0, 0, W, H)
-  mBottom.style.display = 'none'
-  mLeft.style.display = 'none'
-  mRight.style.display = 'none'
+  if (CLIP_OK) {
+    maskHole.style.display = 'block'
+    maskHole.style.clipPath = 'none'
+    hideLegacyMasks()
+  } else {
+    const W = myW(), H = myH()
+    setMask(mTop, 0, 0, W, H)
+    mBottom.style.display = 'none'
+    mLeft.style.display = 'none'
+    mRight.style.display = 'none'
+    maskHole.style.display = 'none'
+  }
   sel.style.display = 'none'
   tip.style.display = 'none'
 }
@@ -123,10 +187,19 @@ function renderSelection(globalRect) {
   sel.style.width = r.width + 'px'
   sel.style.height = r.height + 'px'
 
-  setMask(mTop, 0, 0, W, r.y)
-  setMask(mBottom, 0, r.y + r.height, W, H - r.y - r.height)
-  setMask(mLeft, 0, r.y, r.x, r.height)
-  setMask(mRight, r.x + r.width, r.y, W - r.x - r.width, r.height)
+  if (CLIP_OK) {
+    // 单遮罩 + evenodd 挖洞：仅改 clip-path（paint），不触发 4 个 div 的逐帧 layout
+    maskHole.style.display = 'block'
+    maskHole.style.clipPath = holeClip(r, W, H)
+    hideLegacyMasks()
+  } else {
+    // 回退：四块遮罩围出亮区
+    maskHole.style.display = 'none'
+    setMask(mTop, 0, 0, W, r.y)
+    setMask(mBottom, 0, r.y + r.height, W, H - r.y - r.height)
+    setMask(mLeft, 0, r.y, r.x, r.height)
+    setMask(mRight, r.x + r.width, r.y, W - r.x - r.width, r.height)
+  }
 
   tip.style.display = 'block'
   tip.textContent = Math.round(globalRect.width) + ' × ' + Math.round(globalRect.height)
@@ -181,13 +254,23 @@ document.addEventListener('mousedown', () => {
   window.api.dragStart().catch(() => {})
 })
 
+// 放大镜调度：合并到 rAF（mousemove 频率可达 125–1000Hz，远高于 60fps）
+let pendingMouse = null
+let magRaf = 0
 document.addEventListener('mousemove', (e) => {
-  updateMagnifier(e.clientX, e.clientY)
+  pendingMouse = { x: e.clientX, y: e.clientY }
+  if (magRaf) return
+  magRaf = requestAnimationFrame(() => {
+    magRaf = 0
+    if (pendingMouse) updateMagnifier(pendingMouse.x, pendingMouse.y)
+  })
 })
 
 document.addEventListener('mouseup', async () => {
   const rect = await window.api.dragEnd()
   if (!rect || rect.width < 4 || rect.height < 4) return
+
+  await waitScreensReady() // 先出遮罩后填图：若截图尚未就绪则等待，避免裁到旧图
 
   try {
     const { canvas, label } = cropRect(rect) || {}

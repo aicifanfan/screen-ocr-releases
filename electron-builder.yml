@@ -14,9 +14,20 @@ publish:
   repo: screen-ocr-releases
   releaseType: release
 win:
+  # 同时产出：
+  #   nsis → 带「创建桌面快捷方式」选项的安装包（自动更新使用这个）
+  #   zip  → 免安装压缩包，解压即用，方便分享
   target:
     - nsis
+    - zip
   icon: assets/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 截屏OCR
+  # 自定义安装脚本：在「选择安装位置」后插入「选择附加任务」页，
+  # 提供「创建桌面快捷方式」复选框（默认勾选），取消勾选则不创建
+  include: assets/installer.nsh
+  deleteAppDataOnUninstall: false

@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('api', {
   onScreens: (cb) => ipcRenderer.on('overlay:screens', (_e, payload) => cb(payload)),
   // 主进程广播的拖拽状态（跨屏同步渲染选区）
   onSync: (cb) => ipcRenderer.on('overlay:sync', (_e, payload) => cb(payload)),
+  // 遮罩预热：复用窗口立即显示（先出遮罩，截图数据稍后推入）
+  onPrepare: (cb) => ipcRenderer.on('overlay:prepare', () => cb()),
   // 拖拽开始（主进程记录起点并开始轮询全局鼠标坐标）
   dragStart: () => ipcRenderer.invoke('overlay:dragStart'),
   // 拖拽结束（主进程返回最终全局物理选区矩形）

@@ -17,6 +17,9 @@ import sys
 import json
 import base64
 import io
+import os
+import re
+import time
 
 import numpy as np
 from PIL import Image
@@ -30,6 +33,55 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
+# ---------------------------------------------------------------- 识别档位
+# 性能结论（见 python/bench_ocr.py，退化样本集实测）：
+#   baseline(rapidocr 默认)  CER 9.09%  1335ms/图
+#   balanced(本默认)         CER 2.16%   142ms/图   ← 速度 9.4x、错误率降到 1/4
+#   fast(tiny)               CER 3.46%    46ms/图
+#   accurate(medium)         CER 0.72%  1887ms/图   ← 精度最高但慢
+#
+# 关键改动：
+#   1) Det.limit_type 由 min 改 max —— 默认值会把「短边强制放大到 736」，
+#      截屏选区通常只有几十像素高，会被放大十几倍：既慢，又把模糊噪声一起放大，准确率反而更差。
+#   2) use_cls=False —— 截图文字基本水平，跳过 180° 方向分类。
+#   3) intra_op_num_threads 固定为上核数（-1 会用满所有核心，小图并行度低、线程调度开销大）。
+#   4) rec_batch_num 6→12 —— 减少小图块的调度开销。
+PROFILES = ("fast", "balanced", "accurate")
+
+
+def _model_type(name):
+    """取 ModelType 枚举（不同 rapidocr 版本可能没有该枚举，降级为字符串）"""
+    try:
+        from rapidocr.utils.typings import ModelType
+        return getattr(ModelType, name.upper())
+    except Exception:  # noqa: BLE001
+        return name
+
+
+def build_params(profile):
+    threads = max(2, min(8, (os.cpu_count() or 4)))
+    params = {
+        "Global.use_cls": False,          # 跳过方向分类
+        "Global.text_score": 0.45,        # 略降阈值，减少小字漏检
+        "Det.limit_side_len": 960,        # 只限制大图，不放大原图
+        "Det.limit_type": "max",
+        "Rec.rec_batch_num": 12,
+        "EngineConfig.onnxruntime.intra_op_num_threads": threads,
+    }
+    if profile == "fast":
+        params.update({
+            "Det.limit_side_len": 736,
+            "Det.model_type": _model_type("tiny"),
+            "Rec.model_type": _model_type("tiny"),
+        })
+    elif profile == "accurate":
+        params.update({
+            "Det.model_type": _model_type("medium"),
+            "Rec.model_type": _model_type("medium"),
+        })
+    return params
+
+
 def parse_output(res):
     """兼容 rapidocr 返回结构，统一提取 texts / boxes(矩形[x1,y1,x2,y2]) / scores。
 
@@ -41,20 +93,32 @@ def parse_output(res):
 
     # 3.x / 2.x 返回 RapidOCROutput 对象（含 .txts / .boxes / .scores）
     if hasattr(res, "txts"):
-        texts = [str(t) for t in res.txts]
+        raw_txts = list(res.txts or [])
+        raw_boxes = res.boxes
+        raw_scores = getattr(res, "scores", None)
 
-        if hasattr(res, "boxes") and res.boxes is not None:
-            raw = res.boxes.tolist() if isinstance(res.boxes, np.ndarray) else list(res.boxes)
-            for quad in raw:
-                # quad：4 个角点 [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+        if raw_boxes is not None:
+            raw_boxes = raw_boxes.tolist() if isinstance(raw_boxes, np.ndarray) else list(raw_boxes)
+        else:
+            raw_boxes = []
+        raw_scores = list(raw_scores) if raw_scores is not None else []
+
+        # 过滤空文本（并保持 boxes/scores 一一对应）
+        for idx, t in enumerate(raw_txts):
+            if t is None:
+                continue
+            s = str(t)
+            if not s.strip():
+                continue
+            texts.append(s)
+            if idx < len(raw_boxes):
+                quad = raw_boxes[idx]
                 xs = [float(p[0]) for p in quad]
                 ys = [float(p[1]) for p in quad]
                 boxes.append([min(xs), min(ys), max(xs), max(ys)])
-
-        if hasattr(res, "scores") and res.scores is not None:
-            scores = [float(s) for s in res.scores]
-        else:
-            scores = [1.0] * len(texts)
+            else:
+                boxes.append([0.0, 0.0, 0.0, 0.0])
+            scores.append(float(raw_scores[idx]) if idx < len(raw_scores) else 1.0)
         return texts, boxes, scores
 
     # 1.x 返回 (result, elapse) 元组
@@ -84,7 +148,7 @@ FULLWIDTH_MAP = {
 
 
 def postprocess_text(text):
-    """保守的符号规范化：星号变体 → *，全角标点/符号 → 半角。
+    """保守的符号规范化：星号变体 → *，全角标点/符号 → 半角，并清理中文间多余空格。
 
     仅处理「本质上就是该符号」的 Unicode 变体（如全角＊、数学星号 ∗），
     不做启发式推断（不把 ×/x 强行改回 *），避免误伤乘号等真实字符。
@@ -95,6 +159,31 @@ def postprocess_text(text):
         text = text.replace(ch, "*")
     for k, v in FULLWIDTH_MAP.items():
         text = text.replace(k, v)
+    return clean_cjk_spaces(text)
+
+
+# 中文标点（含全角符号区）
+_CJK = "\u4e00-\u9fa5"
+_CJK_PUNCT = "\u3000-\u303f\uff00-\uffef"
+
+
+def clean_cjk_spaces(text):
+    """清理 OCR 在中文之间误插的空格（中文无需词间空格，粘贴时尤其碍事）。
+
+    只处理「纯中文/中文标点」之间的空白：
+      - 中文 与 中文 之间的空格 → 删除
+      - 中文 与 中文标点 之间的空格 → 删除
+      - 中文 与 英文/数字 之间的空格 → 保留（可读性需要）
+    """
+    if not text:
+        return text
+    # 中文 ↔ 中文
+    text = re.sub(r"(?<=[" + _CJK + r"])\s+(?=[" + _CJK + r"])", "", text)
+    # 中文 ↔ 中文标点
+    text = re.sub(r"(?<=[" + _CJK + r"])\s+(?=[" + _CJK_PUNCT + r"])", "", text)
+    text = re.sub(r"(?<=[" + _CJK_PUNCT + r"])\s+(?=[" + _CJK + r"])", "", text)
+    # 连续的内部空白压缩为一个（不处理首尾，避免破坏排版）
+    text = re.sub(r"[ \t]{2,}", " ", text)
     return text
 
 
@@ -105,8 +194,24 @@ def _emit(obj):
 
 
 def main():
-    engine = RapidOCR()
-    _emit({"type": "ready"})
+    profile = (os.environ.get("SCREEN_OCR_PROFILE") or "balanced").strip().lower()
+    if profile not in PROFILES:
+        profile = "balanced"
+
+    def new_engine(p):
+        try:
+            return RapidOCR(params=build_params(p)), p
+        except Exception as exc:  # noqa: BLE001
+            # 例如 accurate 档的 medium 模型未随包分发且当前无网络下载 → 回退 balanced
+            if p != "balanced":
+                _emit({"type": "warn", "message": "档位 %s 不可用(%s)，已回退 balanced" % (p, exc)})
+                return RapidOCR(params=build_params("balanced")), "balanced"
+            raise
+
+    t0 = time.perf_counter()
+    engine, profile = new_engine(profile)
+    init_ms = (time.perf_counter() - t0) * 1000
+    _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1)})
 
     for line in sys.stdin:
         line = line.strip()
@@ -120,14 +225,27 @@ def main():
         seq = req.get("seq")
         kind = req.get("type")
 
+        # 运行时切换档位（设置页改精度后即时生效，无需重启）
+        if kind == "setProfile":
+            p = str(req.get("profile") or "").strip().lower()
+            if p in PROFILES and p != profile:
+                t0 = time.perf_counter()
+                engine, profile = new_engine(p)
+                _emit({"type": "profileChanged", "seq": seq, "profile": profile,
+                       "init_ms": round((time.perf_counter() - t0) * 1000, 1)})
+            else:
+                _emit({"type": "profileChanged", "seq": seq, "profile": profile, "init_ms": 0})
+            continue
+
         if kind == "recognize":
             try:
+                t_start = time.perf_counter()
                 raw = base64.b64decode(req["image"])
                 img = Image.open(io.BytesIO(raw)).convert("RGB")
                 arr = np.array(img)
                 res = engine(arr)
                 texts, boxes, scores = parse_output(res)
-                # 识别结果符号规范化（星号变体/全角标点 → 半角）
+                # 识别结果符号规范化（星号变体/全角标点 → 半角 + 中文间空格清理）
                 texts = [postprocess_text(t) for t in texts]
                 _emit({
                     "type": "result",
@@ -135,6 +253,8 @@ def main():
                     "texts": texts,
                     "boxes": boxes,
                     "scores": scores,
+                    "profile": profile,
+                    "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
                 })
             except Exception as exc:  # noqa: BLE001
                 _emit({"type": "error", "seq": seq, "message": str(exc)})

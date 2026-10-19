@@ -108,6 +108,16 @@
   }
   .hotkey-reset:hover { color: var(--danger); background: #fef2f2; }
 
+  /* 下拉选择（识别精度） */
+  .sel {
+    flex: 0 0 auto; min-width: 104px;
+    padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--border, #e5e7eb);
+    background: #fff; color: var(--text-1, #111827);
+    font-size: 13px; cursor: pointer; outline: none;
+  }
+  .sel:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+
   /* Toggle 开关 */
   .switch { position: relative; width: 44px; height: 26px; flex: 0 0 auto; }
   .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
@@ -190,6 +200,17 @@
       <div class="card-title">通用</div>
       <div class="row">
         <div>
+          <div class="label">识别精度</div>
+          <div class="desc">均衡：速度与准确度兼顾（推荐）；高精度更准但明显更慢；快速适合大段文字</div>
+        </div>
+        <select class="sel" id="opt-ocr-profile">
+          <option value="fast">快速</option>
+          <option value="balanced">均衡</option>
+          <option value="accurate">高精度</option>
+        </select>
+      </div>
+      <div class="row">
+        <div>
           <div class="label">开机自启动</div>
           <div class="desc">登录 Windows 后自动在后台运行</div>
         </div>
@@ -201,7 +222,7 @@
       <div class="row">
         <div>
           <div class="label">启动时立即截屏</div>
-          <div class="desc">双击图标打开时直接弹出截图选区</div>
+          <div class="desc">默认关闭。关闭时程序启动后只在托盘待命，由快捷键 / 托盘菜单主动触发截屏</div>
         </div>
         <label class="switch">
           <input type="checkbox" id="opt-capture-launch">
@@ -215,6 +236,16 @@
         </div>
         <label class="switch">
           <input type="checkbox" id="opt-auto-close">
+          <span class="track"></span><span class="thumb"></span>
+        </label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="label">GPU 硬件加速（实验性）</div>
+          <div class="desc">关闭时走兼容模式（更稳定，默认开启）；开启后框选拖拽更流畅，但个别显卡驱动可能导致启动失败（崩溃后会自动降级）</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="opt-gpu">
           <span class="track"></span><span class="thumb"></span>
         </label>
       </div>

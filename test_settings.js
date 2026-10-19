@@ -10,7 +10,7 @@ const PRELOAD = path.join(__dirname, 'src', 'preload', 'index.js')
 const SETTINGS = path.join(__dirname, 'src', 'renderer', 'settings.html')
 
 // mock 主进程设置 IPC（测试进程不加载 index.js）
-ipcMain.handle('settings:get', () => ({ shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: true, autoCloseAfterCopy: true, autoCheckUpdate: true }))
+ipcMain.handle('settings:get', () => ({ shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, disableGpu: true, ocrProfile: 'balanced' }))
 ipcMain.handle('settings:set', (_e, partial) => ({ ok: true, saved: partial }))
 ipcMain.handle('settings:close', () => {})
 ipcMain.handle('app:version', () => '0.1.0')
@@ -49,7 +49,9 @@ app.whenReady().then(async () => {
       hasVersion: !!document.getElementById('app-version'),
       hasCheckUpdate: !!document.getElementById('btn-check-update'),
       hasAutoCheck: !!document.getElementById('opt-auto-check'),
-      hasUpdateStatus: !!document.getElementById('update-status')
+      hasUpdateStatus: !!document.getElementById('update-status'),
+      hasGpuOpt: !!document.getElementById('opt-gpu'),
+      hasOcrProfile: !!document.getElementById('opt-ocr-profile')
     })`)
     console.log('[OK] DOM 元素:', JSON.stringify(dom))
 
@@ -101,7 +103,7 @@ app.whenReady().then(async () => {
 
     const ok = ready && dom.hasHotkey && dom.hasAutoLaunch && dom.hasCaptureLaunch && dom.hasAutoClose && dom.hasSave &&
       dom.hasZoomIn && dom.hasZoomOut && dom.hasZoomReset && dom.hasZoomVal &&
-      dom.hasVersion && dom.hasCheckUpdate && dom.hasAutoCheck && dom.hasUpdateStatus &&
+      dom.hasVersion && dom.hasCheckUpdate && dom.hasAutoCheck && dom.hasUpdateStatus && dom.hasGpuOpt && dom.hasOcrProfile &&
       recorded.text === 'Ctrl + Shift + B' && recorded.recording === false &&
       esc.text === 'Ctrl + Shift + B' && esc.recording === false &&
       zoom.f1 > 1.05 && zoom.l1 === '110%' && zoom.f2 > 1.15 && zoom.l2 === '120%' &&

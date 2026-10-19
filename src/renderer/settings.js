@@ -1,5 +1,5 @@
 // 设置页逻辑：快捷键录制 + 开关项 + 保存
-const DEFAULTS = { shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: true, autoCloseAfterCopy: true, autoCheckUpdate: true }
+const DEFAULTS = { shortcut: 'CommandOrControl+Shift+A', autoLaunch: false, captureOnLaunch: false, autoCloseAfterCopy: true, autoCheckUpdate: true, ocrProfile: 'balanced' }
 
 const hotkeyBox = document.getElementById('hotkey-box')
 const hotkeyText = document.getElementById('hotkey-text')
@@ -8,6 +8,8 @@ const optAutoLaunch = document.getElementById('opt-autolaunch')
 const optCaptureLaunch = document.getElementById('opt-capture-launch')
 const optAutoClose = document.getElementById('opt-auto-close')
 const optAutoCheck = document.getElementById('opt-auto-check')
+const optGpu = document.getElementById('opt-gpu')
+const optOcrProfile = document.getElementById('opt-ocr-profile')
 const appVersion = document.getElementById('app-version')
 const btnCheckUpdate = document.getElementById('btn-check-update')
 const updateStatus = document.getElementById('update-status')
@@ -125,7 +127,9 @@ btnSave.addEventListener('click', async () => {
     autoLaunch: optAutoLaunch.checked,
     captureOnLaunch: optCaptureLaunch.checked,
     autoCloseAfterCopy: optAutoClose.checked,
-    autoCheckUpdate: optAutoCheck.checked
+    autoCheckUpdate: optAutoCheck.checked,
+    disableGpu: !optGpu.checked,
+    ocrProfile: optOcrProfile.value
   }
   try {
     const result = await window.api.setSettings(partial)
@@ -179,9 +183,11 @@ async function init() {
   pendingShortcut = cfg.shortcut || DEFAULTS.shortcut
   displayShortcut(pendingShortcut)
   optAutoLaunch.checked = !!cfg.autoLaunch
-  optCaptureLaunch.checked = cfg.captureOnLaunch !== false
+  optCaptureLaunch.checked = cfg.captureOnLaunch === true // 默认关闭：需用户主动触发截屏
   optAutoClose.checked = cfg.autoCloseAfterCopy !== false
   optAutoCheck.checked = cfg.autoCheckUpdate !== false
+  optGpu.checked = cfg.disableGpu === false // 默认关闭：只有显式设为 false 才启用 GPU
+  optOcrProfile.value = cfg.ocrProfile || 'balanced'
 
   // 显示版本号
   try {
