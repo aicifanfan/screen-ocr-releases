@@ -92,11 +92,22 @@ class OcrBridge {
     let msg
     try { msg = JSON.parse(line) } catch { return } // 非 JSON 行（第三方库日志）直接忽略
 
+    // sidecar 的告警（例如「档位模型不可用，已回退 balanced」）不能静默吞掉，
+    // 否则设置页显示「高精度」、引擎实际跑「均衡」，用户只会觉得"设置没生效"
+    if (msg.type === 'warn') {
+      console.warn('[ocr] 警告:', msg.message)
+      return
+    }
+
     if (msg.type === 'ready') {
+      if (msg.profile) this.profile = msg.profile // 以引擎实际加载的档位为准（可能发生回退）
       this.ready = true
       if (this._readyResolve) this._readyResolve()
       return
     }
+
+    // 档位切换回包：同样以引擎回报为准
+    if (msg.type === 'profileChanged' && msg.profile) this.profile = msg.profile
 
     const seq = msg.seq
     if (seq != null && this.pending.has(seq)) {
@@ -197,11 +208,15 @@ class OcrBridge {
   async setProfile(profile) {
     const p = String(profile || '').trim().toLowerCase()
     if (!['fast', 'balanced', 'accurate'].includes(p) || p === this.profile) return false
-    this.profile = p
-    if (!this.proc) return true // 尚未启动：下次 init 会用新档位
+    if (!this.proc) { this.profile = p; return true } // 尚未启动：下次 init 会用新档位
+
+    // 关键：只有引擎确认后才改 this.profile。
+    // 先改后发一旦失败，会变成「本地记 balanced、引擎还跑 accurate」，
+    // 之后再次保存又因 p === this.profile 直接跳过，永远切不回来。
     try {
-      await this._send({ type: 'setProfile', profile: p })
-      return true
+      const res = await this._send({ type: 'setProfile', profile: p })
+      if (res && res.profile) this.profile = res.profile
+      return this.profile === p
     } catch {
       return false
     }

@@ -568,7 +568,8 @@ ipcMain.handle('settings:get', () => getAll())
 // IPC：保存配置
 ipcMain.handle('settings:set', (_e, partial) => {
   try {
-    const old = getAll()
+    // 快照旧值：后面 update() 可能会换掉缓存对象，直接持有引用会让「是否变化」判断失效
+    const old = { ...getAll() }
     const shortcutChanged = partial.shortcut && partial.shortcut !== old.shortcut
 
     // 应用快捷键（失败则回滚旧快捷键并报错）
@@ -583,15 +584,19 @@ ipcMain.handle('settings:set', (_e, partial) => {
       app.setLoginItemSettings({ openAtLogin: partial.autoLaunch })
     }
 
+    // 应用 OCR 档位（运行时切换，无需重启）
+    // 必须在写配置之前判断：写配置会改变缓存，之后再比就永远相等了（历史 bug）
+    if (partial.ocrProfile && partial.ocrProfile !== old.ocrProfile) {
+      ocr.setProfile(partial.ocrProfile)
+        .then((ok) => {
+          log.info('OCR 档位切换 -> ' + partial.ocrProfile + '：' +
+            (ok ? '成功' : '失败（引擎未确认，仍为 ' + ocr.profile + '）'))
+        })
+        .catch((e) => log.error('OCR 档位切换异常: ' + (e && e.message)))
+    }
+
     // 写入配置
     update(partial)
-
-    // 应用 OCR 档位（运行时切换，无需重启）
-    if (partial.ocrProfile && partial.ocrProfile !== old.ocrProfile) {
-      ocr.setProfile(partial.ocrProfile).then((ok) => {
-        log.info('OCR 档位切换 -> ' + partial.ocrProfile + '：' + (ok ? '成功' : '失败'))
-      })
-    }
 
     // 刷新托盘菜单/提示中的快捷键文本
     if (shortcutChanged && tray && tray.refresh) tray.refresh()
@@ -637,7 +642,9 @@ app.whenReady().then(() => {
   app.setLoginItemSettings({ openAtLogin: !!cfg.autoLaunch })
 
   // 预热 OCR 模型，避免首次截图卡顿
-  ocr.init().catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
+  ocr.init()
+    .then(() => log.info('OCR 就绪：实际档位 ' + ocr.profile))
+    .catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
 
   // 预热系统缩放读取：把 ~1s 的外部进程调用挪到启动阶段（异步，不阻塞窗口）
   readSystemScale()

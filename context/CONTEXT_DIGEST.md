@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.2.2（已发布）
-status: 0.2.2 已打包并发布 v0.2.2（含 high-accuracy medium 模型）；43 项 + 桥接健壮性全 PASS
-next: 网络恢复后复核公网下载；可选代码签名
+version: 0.2.3（未发布，修复档位切换）
+status: 0.2.2 已发布；0.2.3 修复「切档位不生效」根因（config 对象被就地改写）；档位链路 10 项 PASS
+next: 打包发布 0.2.3（用户当前需重启才能让 balanced 生效）
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -16,9 +16,10 @@ derived_from: process/2026-10-19_process.log.md
 
 ## §0 一句话状态
 
-**0.2.1 已发布**；0.2.2 完成「变慢」定位：美化只影响渲染 3ms（非瓶颈），真实耗时是 OCR 档位与截图。
-已把 UI 侧隐性等待清零（主进程阻塞 1s→0、结果窗 413ms→131ms），并补齐 OCR 超时/重试/坏图等边界；
-结果页 43 项、OCR 桥接健壮性 6 项、i18n 与设置页全 PASS。尚未打包。
+**「切均衡还是慢」的根因已定位并修复**：`config.update()` 就地改写缓存对象，导致 `settings:set` 里
+「档位是否变化」永远判 false，切换从未到达 OCR 引擎（全日志 0 条「档位切换」）。
+同图实测 accurate 24.0s vs balanced 1.6s（15×）。修复后档位链路 10 项 PASS，全量回归通过；0.2.3 未打包。
+（0.2.2 及更早可先重启应用让 balanced 生效。）
 
 ## §1 关键结论
 
@@ -33,6 +34,8 @@ derived_from: process/2026-10-19_process.log.md
 | **K7** | 隐藏窗口（`show:false`）会暂停 rAF、延迟 `setContentSize` 传播；**产品侧真实存在「窗口被遮挡时选区计数不更新」**，已加 120ms 兜底 | 对照组实测 | `P-11` |
 | **K8** | **美化没有拖慢渲染**：同一份数据 A/B，结果页 `items` 28ms → 31ms，`load` 564ms → 561ms。真实耗时在 OCR 引擎（accurate 2–4.5s）与截图（0.7–1.0s） | A/B 实测 + 运行日志 | `P-15` |
 | **K9** | 0.2.1 里两处「UI 侧隐性等待」：主进程同步读 DPI 阻塞 **750–1065ms**；结果窗口在 OCR 完成后才创建，还要再加 **413ms** 加载 | 心跳 + 窗口基准 | `P-15` |
+| **K10** | **「切均衡仍很慢」的根因是配置对象被就地改写**：`update()` 用 `Object.assign(load(), partial)`，`settings:set` 在写入后才比 `old.ocrProfile` → 永远相等 → `setProfile` 从未调用（全日志 0 条切换记录）。引擎一直跑 accurate | 最小复现 + 日志 | `P-17` |
+| **K11** | 同图（1200×700、14 行）引擎实测：**accurate 23996ms vs balanced 1610ms（15×）**；这不是美化引入的，`e7527e8` 就有此 bug | 真实 exe + OcrBridge | `P-17` |
 
 ## §2 决策（含被否方案）
 
@@ -53,6 +56,8 @@ derived_from: process/2026-10-19_process.log.md
 | **D13** | 主进程读系统 DPI 改 **`execFile` 异步 + 启动预热** | 同步调用把事件循环冻住 1s，期间所有 IPC 排队 | 保留 `execSync`（简单但每次首窗卡 1s） | `K9`、`P-15` |
 | **D14** | 结果窗口在 **OCR 开始时预建（`show:false`）**，`ready-to-show` 再显示 | 页面加载与识别并行，省 413ms 且无白屏；`result:get` 用 `{pending}` 区分「还没来」 | 等 OCR 完成再建窗（现状） | `K9`、`P-15` |
 | **D15** | OCR 未完成时 `result:get` 返回 **`{pending:true}`**，渲染层保持骨架 | 不能把「还没来」误判成「没识别到文字」 | 返回 `null`（会闪空状态） | `P-15` |
+| **D16** | `config.update()` 改为**替换**缓存对象；`settings:set` 取快照 + **先应用档位再写配置** | 就地改写会让调用方持有的 `old` 一起变，所有「值是否变化」判断失效（K10） | 继续就地改写 | `K10` |
+| **D17** | `OcrBridge.setProfile` **引擎确认后**才更新 `this.profile`；`ready/profileChanged` 以引擎回报为准 | 先改后发一旦失败会永久失联，之后 `p === this.profile` 直接跳过，再也切不回来 | 发完就改本地状态 | `P-17` |
 
 ## §3 未完成事项（按优先级）
 
@@ -69,6 +74,8 @@ derived_from: process/2026-10-19_process.log.md
 | **T9** | 打包发布 0.2.1 | **已完成（P-12/P-13）** | T1–T8 | `package.json`、`electron-builder.yml`、`dist/`、GitHub Release | 源码 `e213880` 已推；资产 3 个上传；latest → v0.2.1 |
 | **T10** | **性能定位与健壮性（0.2.2）** | **已完成（P-15）** | T1–T9 | `index.js`、`ocr-bridge.js`、`result.js`、`overlay.*`、i18n | 主进程阻塞归零；窗口 413→131ms；超时/重试/坏图全测 |
 | **T11** | 打包发布 0.2.2 | **已完成（P-16）** | T10 | `dist/`、Release | v0.2.2 已建，3 个资产 201；latest → v0.2.2 |
+| **T12** | **修复「切档位不生效」（0.2.3）** | **已完成（P-17）** | T10 | `config.js`、`index.js`、`ocr-bridge.js`、新增测试 | 档位链路 10 项 PASS；同图 24.0s→1.6s |
+| **T13** | 打包发布 0.2.3 | 未开始 | T12 | `dist/`、Release | 用户当前只能靠重启生效 |
 
 > 风险最高的是 T1：编辑、复制全文、多屏分组、连续截图刷新都要回归。建议单独提交 + 打 tag。
 
@@ -87,6 +94,8 @@ derived_from: process/2026-10-19_process.log.md
 | **C9** | 测试里的窗口尺寸断言必须**轮询等待**媒体查询生效（`waitFor`），不能用固定 `sleep`：隐藏窗口下 resize 传播是异步的。 |
 | **C10** | **主进程禁止同步调用外部进程**（`execSync`）：一次 PowerShell 就要 0.75–1.1s，会把 IPC 全卡住。外部命令一律 `execFile` + 超时 + 缓存。 |
 | **C11** | OCR 侧超时约定：ready 25s、单请求 90s（`SCREEN_OCR_READY_TIMEOUT` / `SCREEN_OCR_REQUEST_TIMEOUT` 仅供测试覆盖）；只在进程退出类错误上重启重试一次，超时不重试。 |
+| **C12** | **`config.update()` 不得就地改写缓存**：调用方普遍写 `const old = getAll(); update(x); if (x !== old.x)`，就地改写会让判断永远为 false。新增「先读旧值→再写配置」的逻辑时，旧值必须取快照（`{ ...getAll() }`）。 |
+| **C13** | 「引擎/外部进程的实际状态」一律以对端回报为准（`ready.profile`、`profileChanged.profile`），本地变量只在确认后更新；失败必须写日志，不能静默。 |
 
 ## §5 产物索引
 
@@ -109,8 +118,9 @@ derived_from: process/2026-10-19_process.log.md
 | **F15** | `src/renderer/styles/settings.css` | 7,036 B / 298 行 | 新建：设置页布局 |
 | **F16** | `src/renderer/settings.html` | 6,370 B / 164 行 | 已改：接入令牌/组件，布局改弹性 |
 | **F17** | `docs/result-demo.html` | 69,685 B | 自动生成（`npm run demo:html`），演示页可独立打开 |
-| **F18** | `src/main/index.js` / `src/main/ocr-bridge.js` | 27,890 B / 7,816 B | 0.2.2：DPI 异步、结果窗预建、OCR 直传与超时重试 |
-| **F19** | `tests/test_ocr_bridge_resilience.js` + `tests/fixtures/fake-ocr-server.js` | 3,345 B / 1,343 B | 新增：假 sidecar 验证超时/重试/脏输出/空输入 |
+| **F18** | `src/main/index.js` / `src/main/ocr-bridge.js` / `config.js` | 28,371 B / 8,729 B / 2,798 B | 0.2.2 性能；0.2.3 修复 config 就地改写与档位切换 |
+| **F19** | `tests/test_ocr_bridge_resilience.js` + `tests/fixtures/fake-ocr-server.js` | 3,345 B / 1,343 B | 假 sidecar 验证超时/重试/脏输出/空输入 |
+| **F20** | `tests/test_settings_profile.js` | 3,890 B / 92 行 | 新增：配置快照 + 档位切换链路 10 项断言 |
 
 ## §6 关联关系
 

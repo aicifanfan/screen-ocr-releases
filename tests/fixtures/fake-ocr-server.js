@@ -8,7 +8,7 @@ const send = (obj) => {
 }
 
 if (mode === 'garbage') process.stdout.write('this is not json\n')
-if (mode !== 'no-ready') send({ type: 'ready', profile: 'balanced' })
+if (mode !== 'no-ready') send({ type: 'ready', profile: process.env.SCREEN_OCR_PROFILE || 'balanced' })
 
 let buf = ''
 process.stdin.on('data', (d) => {
@@ -24,7 +24,12 @@ process.stdin.on('data', (d) => {
     if (msg.type === 'exit') process.exit(0)
     if (mode === 'silent') continue
     if (mode === 'crash-on-request') process.exit(1)
-    if (msg.type === 'setProfile') { send({ type: 'profileChanged', seq: msg.seq, profile: msg.profile }); continue }
+    if (msg.type === 'setProfile') {
+      // fallback 模式：模拟「请求的档位模型不可用，引擎回退到 balanced」
+      const profile = mode === 'fallback' ? 'balanced' : msg.profile
+      send({ type: 'profileChanged', seq: msg.seq, profile, init_ms: 0 })
+      continue
+    }
     if (msg.type === 'recognize') {
       send({ type: 'ok', seq: msg.seq, texts: ['fake-line'], boxes: [[0, 0, 10, 10]], scores: [0.9], elapse_ms: 1, profile: 'balanced' })
     }

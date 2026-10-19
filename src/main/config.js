@@ -65,9 +65,12 @@ function set(key, val) {
 }
 
 function update(partial) {
-  Object.assign(load(), partial)
+  // 注意：必须替换对象，不能 Object.assign(load(), partial) 就地改写。
+  // 调用方常写成 const old = getAll(); update(x); if (x.ocrProfile !== old.ocrProfile) ...
+  // 就地改写会让 old 跟着变，所有「值是否变化」的判断永远为 false。
+  cache = Object.assign({}, cache || load(), partial)
   persist()
-  return load()
+  return cache
 }
 
 module.exports = { DEFAULTS, getAll, get, set, update }

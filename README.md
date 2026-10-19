@@ -196,6 +196,24 @@ npm run dist
 
 ## 更新日志
 
+### 0.2.3（未发布 · 修复「切换识别精度不生效」）
+
+**根因**：`src/main/config.js` 的 `update()` 用 `Object.assign(load(), partial)` 就地改写缓存对象；
+`settings:set` 在 `update()` **之后**才比较 `partial.ocrProfile !== old.ocrProfile`，
+而此时 `old` 已被改写 → 判断永远为 false → 切换档位从不通知 OCR 引擎。
+表现：设置页显示「均衡」、`settings.json` 也是 balanced，但引擎一直跑 accurate（慢 10–15×）。
+
+**修复**
+- `update()` 改为替换缓存对象（`cache = { ...cache, ...partial }`），不再就地改写。
+- `settings:set` 取旧值快照，并把「应用档位」放在写配置之前；成功/失败都写日志（失败时附带引擎实际档位）。
+- `OcrBridge.setProfile` 只有引擎确认后才更新本地档位；采纳 `ready/profileChanged` 回报的真实档位；`warn` 不再静默。
+- 启动日志新增「OCR 就绪：实际档位 X」，下次可直接从日志确认。
+
+**临时规避（0.2.2 及更早）**：配置已是 balanced 时，**重启应用**即可让引擎按新配置启动。
+
+**自测**：新增 `tests/test_settings_profile.js`（10 项，覆盖配置快照、切换成功/重复/非法、引擎回退不谎报）；
+真实引擎同图对比 accurate 23996ms → balanced 1610ms。
+
 ### 0.2.2（2026-10-19 · 性能与健壮性）
 
 **先给结论**：美化没有拖慢渲染（同一份数据 A/B 对比，结果页渲染仅 +3ms，页面加载时长持平）。
