@@ -4,8 +4,8 @@ scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式�
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
 version: 0.2.1（已打包）
-status: 设计稿已落地并打包 0.2.1（dist/）；39 项 + i18n + 设置页回归全 PASS
-next: 可选：上传 GitHub Releases、代码签名
+status: 0.2.1 已打包并发布 GitHub Release（自动更新链路已通）；39 项 + i18n + 设置页回归全 PASS
+next: 可选：代码签名（消除 SmartScreen 提示）
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -60,7 +60,7 @@ derived_from: process/2026-10-19_process.log.md
 | **T6** | 响应式：窗口变窄后图片重算缩放 | **已完成**（ResizeObserver） | — | `result.js` ≈12 行 | 各宽度无横向溢出、识别框不错位 |
 | **T7** | 加载 / 空状态 / 无原图 / 禁用等边界态 | **已完成（P-11）** | T1 | `result.js` ≈90 行、`components.css` | 骨架→内容无跳动；`aria-busy` 复位 |
 | **T8** | 设置页接入同一令牌与组件层 | **已完成（P-11）** | D9 | `settings.html` + `settings.css` | 540/440 宽无横向溢出；中英不破版 |
-| **T9** | 打包发布 0.2.1 | **已完成（P-12）** | T1–T8 | `package.json`、`electron-builder.yml`、`dist/` | 版本/清单/哈希一致；未安装验证 |
+| **T9** | 打包发布 0.2.1 | **已完成（P-12/P-13）** | T1–T8 | `package.json`、`electron-builder.yml`、`dist/`、GitHub Release | 源码 `e213880` 已推；资产 3 个上传；latest → v0.2.1 |
 
 > 风险最高的是 T1：编辑、复制全文、多屏分组、连续截图刷新都要回归。建议单独提交 + 打 tag。
 
