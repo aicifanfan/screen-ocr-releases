@@ -1,6 +1,6 @@
 {
   "name": "screen-ocr",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "截屏 OCR 工具：截取屏幕任意区域，本地识别文字并支持划选复制",
   "main": "src/main/index.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "demo:html": "node scripts/build-demo.js",
     "build-py": "node scripts/build-py.js",
     "quantize": ".venv-perf/Scripts/python.exe python/tools/quantize_rec.py",
-    "models:sync": ".venv-perf/Scripts/python.exe python/tools/sync_models.py"
+    "models:sync": ".venv-perf/Scripts/python.exe python/tools/sync_models.py",
+    "test:smoke": "node tests/test_app_smoke.js"
   },
   "author": "",
   "license": "MIT",

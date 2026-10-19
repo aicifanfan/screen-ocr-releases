@@ -196,6 +196,32 @@ npm run dist
 
 ## 更新日志
 
+### 0.3.1（2026-10-19 · 修复 0.3.0 双击无反应）
+
+**症状**：装完 0.3.0 后双击图标没反应；任务管理器里能看到进程，但界面不出现。
+装过 0.3.0 的机器上，后续每次双击都是闪一下就没了。
+
+**根因（TDZ）**：0.3.0 把 `ocr.onRefined = ...` 写在了 `const ocr = new OcrBridge()` 之前，
+模块加载阶段就抛 `ReferenceError: Cannot access 'ocr' before initialization`：
+
+```
+[ERROR] uncaughtException: ReferenceError: Cannot access 'ocr' before initialization
+    at Object.<anonymous> (.../app.asar/src/main/index.js:197:1)
+```
+
+主进程在模块求值阶段就中断，窗口/托盘都没建起来；而单实例锁已经被这个半死的进程拿住，
+于是后续双击一律走「非主实例，退出」——看起来就是双击没反应。
+
+**修复**
+- 把 `ocr.onRefined` 的赋值挪进 `bindRefinedHandler()`，在 `const ocr` 之后调用。
+- 新增 `tests/test_app_smoke.js`（`npm run test:smoke`）：真实拉起 Electron 主进程，
+  读 `startup.log` 断言「拿到单实例锁」且「启动期无 uncaughtException」，
+  并已用注入 TDZ 的方式验证过它会失败——0.3.0 这种问题不会再漏。
+- 顺带修：开发模式（`npm start`）优先用项目内 `.venv-perf` 的 Python，
+  否则会落到没装 rapidocr 的系统 Python，日志里报 `OCR 初始化失败: E_OCR_EXITED`。
+
+**如果你已经装了 0.3.0**：先在任务管理器结束「截屏OCR」进程，再装 0.3.1。
+
 ### 0.3.0（2026-10-19 · 两段式渐进识别）
 
 高精度档不再「等 9 秒才出字」：**先出结果（约 1 秒），后台精修完自动替换**。

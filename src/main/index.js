@@ -193,28 +193,34 @@ function applyRefined(payload, msg) {
   return true
 }
 
-// 精修结果由 sidecar 异步推送：更新缓存并刷新窗口
-ocr.onRefined = (msg) => {
-  if (!msg || msg.seq == null) return
-  if (!resultData) {
-    pendingRefined.set(msg.seq, msg)
-    return
-  }
-  const ok = applyRefined(resultData, msg)
-  if (!ok) {
-    pendingRefined.set(msg.seq, msg)
-    return
-  }
-  log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
-    'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
-  if (resultWin && !resultWin.isDestroyed() && resultWinReady) {
-    resultWin.webContents.send('result:update', resultData)
+// 精修结果由 sidecar 异步推送：更新缓存并刷新窗口。
+// 注意：这个赋值必须放在 `const ocr = new OcrBridge(...)` **之后**，
+// 否则模块加载阶段就会踩 TDZ（Cannot access 'ocr' before initialization），
+// 整个主进程直接挂掉、双击无反应（0.3.0 的真实事故）。
+function bindRefinedHandler() {
+  ocr.onRefined = (msg) => {
+    if (!msg || msg.seq == null) return
+    if (!resultData) {
+      pendingRefined.set(msg.seq, msg)
+      return
+    }
+    const ok = applyRefined(resultData, msg)
+    if (!ok) {
+      pendingRefined.set(msg.seq, msg)
+      return
+    }
+    log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
+      'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
+    if (resultWin && !resultWin.isDestroyed() && resultWinReady) {
+      resultWin.webContents.send('result:update', resultData)
+    }
   }
 }
 // OCR 档位来自配置（默认 balanced：实测比默认参数快 9.4x，CER 从 9.09% 降到 2.16%）
 let ocrProfile = 'balanced'
 try { ocrProfile = getAll().ocrProfile || 'balanced' } catch { /* 配置不可读用默认 */ }
 const ocr = new OcrBridge(ocrProfile)
+bindRefinedHandler() // 必须在 ocr 初始化之后绑定（见函数上的注释）
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js')
 

@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.3.0（已发布）
-status: 0.3.0 已打包并发布 v0.3.0（5 个资产）：高精度档首屏 8.9s→1.0s、终态 10.4s 精度不变；结果页 49 项 + 渐进协议 8 项全 PASS
-next: 无必做项；可选：精修打断式（后台线程 + 双 session）、代码签名
+version: 0.3.1（已发布）
+status: 0.3.1 修复 0.3.0 双击无反应（TDZ：ocr.onRefined 赋值早于 const ocr）；新增启动冒烟测试；v0.3.0 已下线
+next: 无必做项；可选：精修打断式、代码签名
 derived_from: process/2026-10-19_process.log.md
 ---
 

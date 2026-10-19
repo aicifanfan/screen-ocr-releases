@@ -33,9 +33,14 @@ class OcrBridge {
       if (fs.existsSync(exe)) return { cmd: exe, args: [] }
     } catch { /* 资源目录不可读 → 走开发期路径 */ }
 
-    // 开发期：优先环境变量指定的 python，否则用系统 python
+    // 开发期：优先环境变量指定的 python；其次项目内的 .venv-perf（钉死版本的隔离环境）；
+    // 最后才用系统 python（可能没装 rapidocr，会立刻退出 → E_OCR_EXITED）。
     // SCREEN_OCR_SCRIPT 仅用于自动化测试（换成假 sidecar），生产环境不要设置
-    const py = process.env.SCREEN_OCR_PYTHON || 'python'
+    const venvPy = path.join(__dirname, '..', '..', '.venv-perf', 'Scripts', 'python.exe')
+    let py = process.env.SCREEN_OCR_PYTHON || ''
+    if (!py) {
+      try { py = fs.existsSync(venvPy) ? venvPy : 'python' } catch { py = 'python' }
+    }
     const script = process.env.SCREEN_OCR_SCRIPT || path.join(__dirname, '..', '..', 'python', 'ocr_server.py')
     return { cmd: py, args: [script] }
   }
