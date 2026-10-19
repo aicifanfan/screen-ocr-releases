@@ -122,6 +122,7 @@ derived_from: process/2026-10-19_process.log.md
 | **F18** | `src/main/index.js` / `src/main/ocr-bridge.js` / `config.js` | 28,371 B / 8,729 B / 2,798 B | 0.2.2 性能；0.2.3 修复 config 就地改写与档位切换 |
 | **F19** | `tests/test_ocr_bridge_resilience.js` + `tests/fixtures/fake-ocr-server.js` | 3,345 B / 1,343 B | 假 sidecar 验证超时/重试/脏输出/空输入 |
 | **F20** | `tests/test_settings_profile.js` | 3,890 B / 92 行 | 新增：配置快照 + 档位切换链路 10 项断言 |
+| **F21** | `docs/OCR识别加速方案-均衡与高精度.md` + `tests/perf/` | 约 22 KB / 5 个脚本 | 加速方案（实测取证、16 项方向、ROI 排序）+ 可复现基准脚本 |
 
 ## §6 关联关系
 
