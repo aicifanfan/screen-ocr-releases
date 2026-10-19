@@ -44,9 +44,30 @@ for _stream in (sys.stdout, sys.stderr):
 #   1) Det.limit_type 由 min 改 max —— 默认值会把「短边强制放大到 736」，
 #      截屏选区通常只有几十像素高，会被放大十几倍：既慢，又把模糊噪声一起放大，准确率反而更差。
 #   2) use_cls=False —— 截图文字基本水平，跳过 180° 方向分类。
-#   3) intra_op_num_threads 固定为上核数（-1 会用满所有核心，小图并行度低、线程调度开销大）。
+#   3) intra_op 线程数按核数自适应（见 _threads），旧版硬编码 min(8, cpu)
+#      在 32 核机器上只用 1/4 算力，实测并行效率 97%，放开近似线性收益。
 #   4) rec_batch_num 6→12 —— 减少小图块的调度开销。
+#   5) accurate 档 det 改用 small：检测只决定「框在哪、几行」，文字仍由 medium rec 识别；
+#      det medium 在 960 封顶下固定吃 2.7s，换 small 只要 0.5s，精度几乎无损（见 docs/优化方向筛选与推进建议.md）。
 PROFILES = ("fast", "balanced", "accurate")
+
+# 允许环境变量覆盖，便于同机 A/B 与出问题回退（不设即用下面的默认值）
+ENV_THREADS = "SCREEN_OCR_THREADS"
+ENV_DET_TYPE = "SCREEN_OCR_DET_TYPE"
+ENV_REC_TYPE = "SCREEN_OCR_REC_TYPE"
+
+
+def _threads():
+    """推理线程数：默认「留 2 核给 UI/系统，上限 24」，可用 SCREEN_OCR_THREADS 覆盖。
+
+    为什么不是 -1（让 ORT 自己决定）：-1 会按物理核开线程，小图上线程调度开销反而变大；
+    为什么留 2 核：侧车与 Electron 主进程/渲染进程抢 CPU 时，UI 更容易卡。
+    """
+    raw = (os.environ.get(ENV_THREADS) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return max(1, min(int(raw), 64))
+    cpu = os.cpu_count() or 4
+    return max(2, min(cpu - 2, 24))
 
 
 def _model_type(name):
@@ -59,7 +80,7 @@ def _model_type(name):
 
 
 def build_params(profile):
-    threads = max(2, min(8, (os.cpu_count() or 4)))
+    threads = _threads()
     params = {
         "Global.use_cls": False,          # 跳过方向分类
         "Global.text_score": 0.45,        # 略降阈值，减少小字漏检
@@ -67,6 +88,7 @@ def build_params(profile):
         "Det.limit_type": "max",
         "Rec.rec_batch_num": 12,
         "EngineConfig.onnxruntime.intra_op_num_threads": threads,
+        "EngineConfig.onnxruntime.inter_op_num_threads": 1,
     }
     if profile == "fast":
         params.update({
@@ -76,10 +98,37 @@ def build_params(profile):
         })
     elif profile == "accurate":
         params.update({
-            "Det.model_type": _model_type("medium"),
+            "Det.model_type": _model_type("small"),
             "Rec.model_type": _model_type("medium"),
         })
+
+    # 环境变量可覆盖任意档位的模型选择，用于同机 A/B（生产默认值不受影响）
+    for env_key, param_key in ((ENV_DET_TYPE, "Det.model_type"), (ENV_REC_TYPE, "Rec.model_type")):
+        val = (os.environ.get(env_key) or "").strip().lower()
+        if val in ("tiny", "small", "medium"):
+            params[param_key] = _model_type(val)
     return params
+
+
+def warmup(engine):
+    """预热：跑一次检测 + 一次识别，把 ORT 的图优化与内存分配挪到启动阶段。
+
+    只做一次很小的推理（白底图，识别结果为空是正常的），目的是让「第一次截图」不再额外多等。
+    失败不影响主流程：预热只是优化，不是功能依赖。
+    """
+    t0 = time.perf_counter()
+    try:
+        # rapidocr 的模型是懒加载，构造 RapidOCR() 并不会建立 ORT session；
+        # 这里显式触发一次 det/rec 的前向，把 session 初始化与内存分配挪到启动阶段。
+        from rapidocr.ch_ppocr_rec.typings import TextRecInput
+        blank = np.full((64, 320, 3), 255, dtype=np.uint8)
+        det = engine._load_det_model()
+        rec = engine._load_rec_model()
+        det(blank)
+        rec(TextRecInput(img=blank[8:56, 16:304]))
+    except Exception:  # noqa: BLE001
+        return None
+    return round((time.perf_counter() - t0) * 1000, 1)
 
 
 def parse_output(res):
@@ -211,7 +260,9 @@ def main():
     t0 = time.perf_counter()
     engine, profile = new_engine(profile)
     init_ms = (time.perf_counter() - t0) * 1000
-    _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1)})
+    warm_ms = warmup(engine)
+    _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
+           "warmup_ms": warm_ms, "threads": _threads()})
 
     for line in sys.stdin:
         line = line.strip()
@@ -231,6 +282,7 @@ def main():
             if p in PROFILES and p != profile:
                 t0 = time.perf_counter()
                 engine, profile = new_engine(p)
+                warmup(engine)  # 切档后立刻预热，避免「切换后第一次识别」特别慢
                 _emit({"type": "profileChanged", "seq": seq, "profile": profile,
                        "init_ms": round((time.perf_counter() - t0) * 1000, 1)})
             else:

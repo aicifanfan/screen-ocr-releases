@@ -199,6 +199,23 @@ CONFIGS = {
                   "Rec.rec_batch_num": 12, "EngineConfig.onnxruntime.intra_op_num_threads": 8},
 }
 
+# ---------------- 0.2.4 的三条候选（A1/B1/C1）----------------
+# det small + rec medium：检测只决定框位置，文字仍由 medium 识别
+_V6_DET_SMALL_REC_MEDIUM = {
+    "Global.use_cls": False, "Global.text_score": 0.45,
+    "Det.limit_side_len": 960, "Det.limit_type": "max",
+    "Det.model_type": ModelType.SMALL, "Rec.model_type": ModelType.MEDIUM,
+    "Rec.rec_batch_num": 12, "EngineConfig.onnxruntime.intra_op_num_threads": 8,
+}
+CONFIGS["v6_medium"] = _V6_DET_SMALL_REC_MEDIUM
+
+# 同一组合，但 rec 换成 INT8 量化模型（model_path 显式指定，绕过 SHA256 下载校验）
+# OCR_REC_MODEL 可指向任意模型文件，便于对比不同量化策略
+INT8_REC_PATH = os.environ.get("OCR_REC_MODEL") or os.path.join(
+    HERE, "models_int8", "PP-OCRv6_rec_medium.onnx")
+if os.path.exists(INT8_REC_PATH):
+    CONFIGS["v6_medium_int8"] = dict(_V6_DET_SMALL_REC_MEDIUM, **{"Rec.model_path": INT8_REC_PATH})
+
 
 def make_engine(cfg_name):
     return RapidOCR(params=CONFIGS.get(cfg_name, {}))

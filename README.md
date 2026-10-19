@@ -196,6 +196,34 @@ npm run dist
 
 ## 更新日志
 
+### 0.2.4（2026-10-19 · 高精度档提速 1.9 倍）
+
+**结果**：17 行长文本截图，高精度档 **16.4s → 8.9s**（同机同图 A/B，实测 1.88×）；
+检测阶段（只跑 det）**2988ms → 405ms**；安装包 **272 MB → 约 215 MB**。
+
+**改了什么**
+
+| 项 | 内容 |
+|---|---|
+| 线程自适应 | `python/ocr_server.py` 原来硬编码 `min(8, cpu)`，32 核机器只用 1/4 算力。改为「留 2 核、上限 24」，可用 `SCREEN_OCR_THREADS` 覆盖 |
+| 高精度档检测换小模型 | accurate 档 `Det` 由 medium 换成 small：检测只决定「框在哪、几行」，文字仍由 medium rec 识别。det 从 2.99s 降到 0.4s，精度几乎不变 |
+| 启动预热 | 构造 `RapidOCR()` 并不会建立 ORT session（模型懒加载）。现在 `ready` 前显式跑一次 det+rec，把首帧开销挪到启动阶段（实测 warmup 约 1.0s） |
+| 包体瘦身 | 不再随包发 det medium（60 MB），`npm run build-py` 会自动清理；模型目录 169 MB → 109 MB |
+
+**没做什么（有实测依据）**
+- **INT8 动态量化没有采用**：速度确实快 4.2–5.0×（73 MB → 18.6 MB），但在退化样本集上 CER 从 0.72% 掉到 **7.2–7.9%**（EM 77.8% → 27.8%），远超「≤ +0.7pp」的门禁。per-channel / 仅量化 Conv / QInt8 三种策略都一样（QInt8 还因缺少 `ConvInteger` 实现无法加载）。工具留在 `python/tools/quantize_rec.py`，默认不启用。
+- **没有改 OCR 模型档位的语义**：fast / balanced / accurate 仍然分别是 tiny / small / medium rec，只是 accurate 的 det 降了一档。
+
+**新增命令**
+```bash
+npm run build-py     # 构建侧车：优先用 .venv-perf，构建后自动同步模型（漏同步会导致静默回退 balanced）
+npm run quantize     # 生成 INT8 rec 模型（实验，默认不套用）
+npm run models:sync  # 只同步模型：拷贝 fp32 + 对齐 default_models.yaml 的 SHA256 + 清理 det medium
+```
+
+**自测**：结果页 43 项、i18n、设置页、复制、多屏、OCR 桥接健壮性、档位链路 全 PASS；
+速度对比脚本见 `tests/perf/ab.js`（可用 `--exe` 指定旧版侧车做同机 A/B）。
+
 ### 0.2.3（2026-10-19 · 修复「切换识别精度不生效」）
 
 **根因**：`src/main/config.js` 的 `update()` 用 `Object.assign(load(), partial)` 就地改写缓存对象；

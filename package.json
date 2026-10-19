@@ -1,6 +1,6 @@
 {
   "name": "screen-ocr",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "截屏 OCR 工具：截取屏幕任意区域，本地识别文字并支持划选复制",
   "main": "src/main/index.js",
   "scripts": {
@@ -9,7 +9,9 @@
     "test": "node tests/test_i18n.js && node tests/test_i18n_scan.js && node tests/test_crop_math.js",
     "test:ui": "electron tests/test_result_ui.js && electron tests/test_i18n_ui.js && electron tests/test_settings.js",
     "demo:html": "node scripts/build-demo.js",
-    "build-py": "pyinstaller python/ocr_server.py --onedir --name ocr_server --distpath python/ocr_pkg --workpath build/pyi --noconfirm --collect-all rapidocr --collect-all onnxruntime"
+    "build-py": "node scripts/build-py.js",
+    "quantize": ".venv-perf/Scripts/python.exe python/tools/quantize_rec.py",
+    "models:sync": ".venv-perf/Scripts/python.exe python/tools/sync_models.py"
   },
   "author": "",
   "license": "MIT",
