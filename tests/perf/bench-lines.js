@@ -3,7 +3,11 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 
-const EXE = path.join(__dirname, '..', '..', 'python', 'ocr_pkg', 'ocr_server', 'ocr_server.exe')
+const SCRIPT = path.join(__dirname, '..', '..', 'python', 'ocr_server.py')
+// SCREEN_OCR_PYTHON 指向 python.exe 时改跑源码（便于在改参数前先验证逻辑）
+const PY = process.env.SCREEN_OCR_PYTHON
+const EXE = PY || path.join(__dirname, '..', '..', 'python', 'ocr_pkg', 'ocr_server', 'ocr_server.exe')
+const ARGS = PY ? [SCRIPT] : []
 const IMAGES = ['blank-1280', 'lines-1', 'lines-4', 'lines-9', 'lines-17']
 const PROFILES = ['fast', 'balanced', 'accurate']
 
@@ -13,7 +17,7 @@ function b64(name) {
 
 function runProfile(profile) {
   return new Promise((resolve) => {
-    const proc = spawn(EXE, [], { env: { ...process.env, SCREEN_OCR_PROFILE: profile } })
+    const proc = spawn(EXE, ARGS, { env: { ...process.env, SCREEN_OCR_PROFILE: profile } })
     let buf = ''
     let seq = 0
     const pending = new Map()

@@ -5,7 +5,7 @@ env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<l
 date: 2026-10-19
 version: 0.2.3（已发布）
 status: 0.2.3 已打包并发布 v0.2.3（4 个资产，含免安装 zip）；档位链路 10 项 + 结果页 43 项全 PASS
-next: 无必做项；可选：代码签名（消除 SmartScreen 提示）
+next: 0.2.4 = A1 线程 + B1 det small + C1 rec INT8（见 docs/优化方向筛选与推进建议.md；E1 排 0.3.0）
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -123,6 +123,7 @@ derived_from: process/2026-10-19_process.log.md
 | **F19** | `tests/test_ocr_bridge_resilience.js` + `tests/fixtures/fake-ocr-server.js` | 3,345 B / 1,343 B | 假 sidecar 验证超时/重试/脏输出/空输入 |
 | **F20** | `tests/test_settings_profile.js` | 3,890 B / 92 行 | 新增：配置快照 + 档位切换链路 10 项断言 |
 | **F21** | `docs/OCR识别加速方案-均衡与高精度.md` + `tests/perf/` | 约 22 KB / 5 个脚本 | 加速方案（实测取证、16 项方向、ROI 排序）+ 可复现基准脚本 |
+| **F22** | `docs/优化方向筛选与推进建议.md` | 约 12 KB / 199 行 | 本地可行性盘点 + 方向筛选 + 推荐 A1+B1+C1 + 推进计划与门禁 |
 
 ## §6 关联关系
 
