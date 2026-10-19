@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.2.2（未打包）
-status: 0.2.1 已发布；0.2.2 完成性能与健壮性优化（结果页 43 项 + OCR 桥接健壮性测试全 PASS），未打包
-next: 如需分发：npm run dist 出 0.2.2 并上传 Release
+version: 0.2.2（已发布）
+status: 0.2.2 已打包并发布 v0.2.2（含 high-accuracy medium 模型）；43 项 + 桥接健壮性全 PASS
+next: 网络恢复后复核公网下载；可选代码签名
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -68,7 +68,7 @@ derived_from: process/2026-10-19_process.log.md
 | **T8** | 设置页接入同一令牌与组件层 | **已完成（P-11）** | D9 | `settings.html` + `settings.css` | 540/440 宽无横向溢出；中英不破版 |
 | **T9** | 打包发布 0.2.1 | **已完成（P-12/P-13）** | T1–T8 | `package.json`、`electron-builder.yml`、`dist/`、GitHub Release | 源码 `e213880` 已推；资产 3 个上传；latest → v0.2.1 |
 | **T10** | **性能定位与健壮性（0.2.2）** | **已完成（P-15）** | T1–T9 | `index.js`、`ocr-bridge.js`、`result.js`、`overlay.*`、i18n | 主进程阻塞归零；窗口 413→131ms；超时/重试/坏图全测 |
-| **T11** | 打包发布 0.2.2 | 未开始（可选） | T10 | `dist/`、Release | `npm run dist` + 上传三个资产 |
+| **T11** | 打包发布 0.2.2 | **已完成（P-16）** | T10 | `dist/`、Release | v0.2.2 已建，3 个资产 201；latest → v0.2.2 |
 
 > 风险最高的是 T1：编辑、复制全文、多屏分组、连续截图刷新都要回归。建议单独提交 + 打 tag。
 
