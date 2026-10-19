@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.2.4（已打包，未发布）
-status: 0.2.4 已打包：高精度 16.4s→8.9s（1.88x）、安装包 272→240MB；INT8 因精度不达标放弃；全量回归 PASS
-next: 发布 0.2.4（dist/ 已就绪）；0.2.5 候选 = 级联识别（small 全量 + 低置信行回退 medium）
+version: 0.2.4（已发布）
+status: 0.2.4 已发布：高精度 16.4s→8.9s（1.88x）、安装包 272→240MB；INT8/级联/切行三个加速实验均因精度或不划算被否；全量回归 PASS
+next: 0.3.0 = E1 两段式渐进（感知 0.3–0.9s）；模型层只有蒸馏能再上一个量级
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -125,6 +125,7 @@ derived_from: process/2026-10-19_process.log.md
 | **F21** | `docs/OCR识别加速方案-均衡与高精度.md` + `tests/perf/` | 约 22 KB / 5 个脚本 | 加速方案（实测取证、16 项方向、ROI 排序）+ 可复现基准脚本 |
 | **F22** | `docs/优化方向筛选与推进建议.md` | 约 12 KB / 199 行 | 本地可行性盘点 + 方向筛选 + 推荐 A1+B1+C1 + 推进计划与门禁 |
 | **F23** | `python/tools/{quantize_rec,sync_models}.py`、`scripts/build-py.js`、`tests/perf/ab.js` | 4 个脚本 | 0.2.4 构建/量化/模型同步/A-B 工具 |
+| **F24** | `python/tools/eval_server.py` | 约 4 KB | 端到端评测（真实 JSON 协议，CER + 耗时，支持 --src） |
 
 ## §6 关联关系
 

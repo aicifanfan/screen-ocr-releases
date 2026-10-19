@@ -49,12 +49,44 @@ for _stream in (sys.stdout, sys.stderr):
 #   4) rec_batch_num 6→12 —— 减少小图块的调度开销。
 #   5) accurate 档 det 改用 small：检测只决定「框在哪、几行」，文字仍由 medium rec 识别；
 #      det medium 在 960 封顶下固定吃 2.7s，换 small 只要 0.5s，精度几乎无损（见 docs/优化方向筛选与推进建议.md）。
+#   6) accurate 档默认走「级联识别」（cascade）：先用 small 识别全部行，只有置信度低的行
+#      再用 medium 重跑。medium rec 的成本是 small 的约 37 倍/行，而绝大多数行 small 就能读对，
+#      因此整体时间从「全部 medium」降到「small 全量 + 少数行 medium」，精度接近纯 medium。
+#      实测：small 的错误是高置信的（0.90 阈值几乎不触发重跑），CER 只从 4.62% 降到 4.62%，
+#      **默认关闭**，保留为实验开关（SCREEN_OCR_CASCADE=1 打开）。
 PROFILES = ("fast", "balanced", "accurate")
 
 # 允许环境变量覆盖，便于同机 A/B 与出问题回退（不设即用下面的默认值）
 ENV_THREADS = "SCREEN_OCR_THREADS"
 ENV_DET_TYPE = "SCREEN_OCR_DET_TYPE"
 ENV_REC_TYPE = "SCREEN_OCR_REC_TYPE"
+ENV_CASCADE = "SCREEN_OCR_CASCADE"
+ENV_CASCADE_THRESH = "SCREEN_OCR_CASCADE_THRESH"
+ENV_CASCADE_MAXRATIO = "SCREEN_OCR_CASCADE_MAXRATIO"
+
+DEFAULT_CASCADE_THRESH = 0.90   # 低于此分数的行用 medium 重跑
+DEFAULT_CASCADE_MAXRATIO = 0.5  # 最多重跑一半的行（超过说明整图都不可信，重跑不划算）
+
+
+def _cascade_on(profile):
+    if profile != "accurate":
+        return False
+    return (os.environ.get(ENV_CASCADE) or "0").strip() not in ("0", "false", "off", "")
+
+
+def _cascade_thresh():
+    try:
+        return float(os.environ.get(ENV_CASCADE_THRESH) or DEFAULT_CASCADE_THRESH)
+    except (TypeError, ValueError):
+        return DEFAULT_CASCADE_THRESH
+
+
+def _cascade_maxratio():
+    try:
+        v = float(os.environ.get(ENV_CASCADE_MAXRATIO) or DEFAULT_CASCADE_MAXRATIO)
+    except (TypeError, ValueError):
+        v = DEFAULT_CASCADE_MAXRATIO
+    return min(max(v, 0.1), 1.0)
 
 
 def _threads():
@@ -99,7 +131,8 @@ def build_params(profile):
     elif profile == "accurate":
         params.update({
             "Det.model_type": _model_type("small"),
-            "Rec.model_type": _model_type("medium"),
+            # 级联模式下主引擎先用 small 全量识别，低置信行再交给 medium 重跑
+            "Rec.model_type": _model_type("small" if _cascade_on(profile) else "medium"),
         })
 
     # 环境变量可覆盖任意档位的模型选择，用于同机 A/B（生产默认值不受影响）
@@ -138,7 +171,7 @@ def parse_output(res):
     形状 (n,4,2)（4 个角点的四边形），scores 为 tuple。这里统一转成可
     JSON 序列化的纯 Python 类型，并把四边形归约为外接矩形。
     """
-    texts, boxes, scores = [], [], []
+    texts, boxes, scores, quads = [], [], [], []
 
     # 3.x / 2.x 返回 RapidOCROutput 对象（含 .txts / .boxes / .scores）
     if hasattr(res, "txts"):
@@ -165,10 +198,12 @@ def parse_output(res):
                 xs = [float(p[0]) for p in quad]
                 ys = [float(p[1]) for p in quad]
                 boxes.append([min(xs), min(ys), max(xs), max(ys)])
+                quads.append(quad)
             else:
                 boxes.append([0.0, 0.0, 0.0, 0.0])
+                quads.append(None)
             scores.append(float(raw_scores[idx]) if idx < len(raw_scores) else 1.0)
-        return texts, boxes, scores
+        return texts, boxes, scores, quads
 
     # 1.x 返回 (result, elapse) 元组
     if isinstance(res, (list, tuple)) and len(res) == 2 and isinstance(res[1], (list, tuple, float, int)):
@@ -181,8 +216,57 @@ def parse_output(res):
                 texts.append(str(item[1]))
                 if len(item) >= 3 and isinstance(item[0], (list, tuple)):
                     boxes.append([float(v) for v in item[0]])
+                else:
+                    boxes.append([0.0, 0.0, 0.0, 0.0])
+                quads.append(None)
                 scores.append(float(item[2]) if len(item) >= 3 and item[2] is not None else 1.0)
-    return texts, boxes, scores
+    return texts, boxes, scores, quads
+
+
+def refine_low_confidence(arr, texts, scores, quads, precise_rec):
+    """级联识别第二步：把置信度低的行用 medium 模型重跑。
+
+    只在 accurate 档启用。返回 (重跑行数, 用掉的毫秒)。
+    任何异常都退化为「保持 small 的结果」，不影响识别可用性。
+    """
+    if not quads or not texts:
+        return 0, 0.0
+
+    thresh = _cascade_thresh()
+    max_n = max(1, int(round(len(texts) * _cascade_maxratio())))
+    low = [i for i, s in enumerate(scores) if s < thresh and quads[i] is not None][:max_n]
+    if not low:
+        return 0, 0.0
+
+    try:
+        from rapidocr.utils.process_img import get_rotate_crop_image
+        from rapidocr.ch_ppocr_rec.typings import TextRecInput
+
+        t0 = time.perf_counter()
+        crops = []
+        for i in low:
+            crop = get_rotate_crop_image(arr, np.array(quads[i], dtype=np.float32))
+            if crop is None or crop.size == 0:
+                continue
+            crops.append(crop)
+        if not crops:
+            return 0, 0.0
+
+        out = precise_rec(TextRecInput(img=crops))
+        new_txts = list(getattr(out, "txts", []) or [])
+        new_scores = list(getattr(out, "scores", []) or [])
+        used = 0
+        for k, i in enumerate(low[:len(new_txts)]):
+            t = str(new_txts[k] or "").strip()
+            if not t:
+                continue  # 重跑出空串：宁可保留 small 的结果
+            texts[i] = new_txts[k]
+            if k < len(new_scores):
+                scores[i] = float(new_scores[k])
+            used += 1
+        return used, round((time.perf_counter() - t0) * 1000, 1)
+    except Exception:  # noqa: BLE001
+        return 0, 0.0
 
 
 # —— 符号规范化（保守）：只做确定性替换，不误伤 ×、x 等真实字符 ——
@@ -259,10 +343,22 @@ def main():
 
     t0 = time.perf_counter()
     engine, profile = new_engine(profile)
+
+    # 级联模式下的「精修」识别器（只在 accurate + cascade 时才真正加载 medium rec）
+    precise = {"engine": None}
+
+    def get_precise():
+        if precise["engine"] is None:
+            params = build_params("accurate")
+            params["Rec.model_type"] = _model_type("medium")
+            holder = RapidOCR(params=params)
+            precise["engine"] = holder._load_rec_model()
+        return precise["engine"]
+
     init_ms = (time.perf_counter() - t0) * 1000
     warm_ms = warmup(engine)
     _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
-           "warmup_ms": warm_ms, "threads": _threads()})
+           "warmup_ms": warm_ms, "threads": _threads(), "cascade": _cascade_on(profile)})
 
     for line in sys.stdin:
         line = line.strip()
@@ -282,6 +378,7 @@ def main():
             if p in PROFILES and p != profile:
                 t0 = time.perf_counter()
                 engine, profile = new_engine(p)
+                precise["engine"] = None  # 档位变了，精修识别器要重建
                 warmup(engine)  # 切档后立刻预热，避免「切换后第一次识别」特别慢
                 _emit({"type": "profileChanged", "seq": seq, "profile": profile,
                        "init_ms": round((time.perf_counter() - t0) * 1000, 1)})
@@ -296,7 +393,11 @@ def main():
                 img = Image.open(io.BytesIO(raw)).convert("RGB")
                 arr = np.array(img)
                 res = engine(arr)
-                texts, boxes, scores = parse_output(res)
+                texts, boxes, scores, quads = parse_output(res)
+                # 级联：低置信行用 medium 重跑（只有 accurate 档会进来）
+                reran, refine_ms = 0, 0.0
+                if _cascade_on(profile):
+                    reran, refine_ms = refine_low_confidence(arr, texts, scores, quads, get_precise())
                 # 识别结果符号规范化（星号变体/全角标点 → 半角 + 中文间空格清理）
                 texts = [postprocess_text(t) for t in texts]
                 _emit({
@@ -306,6 +407,7 @@ def main():
                     "boxes": boxes,
                     "scores": scores,
                     "profile": profile,
+                    "cascade": {"reran": reran, "refine_ms": refine_ms} if _cascade_on(profile) else None,
                     "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
                 })
             except Exception as exc:  # noqa: BLE001
