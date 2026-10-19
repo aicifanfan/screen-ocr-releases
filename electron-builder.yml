@@ -21,6 +21,9 @@ win:
     - nsis
     - zip
   icon: assets/icon.ico
+  # zip 目标用 ASCII 文件名：免安装包也会上传到 Release，
+  # 中文名在下载链接里要百分号编码，容易在第三方工具里出错。
+  artifactName: screen-ocr-${version}-win.${ext}
 nsis:
   # 安装包文件名必须与 latest.yml 里的 url 完全一致，否则自动更新在 GitHub 上找不到资产。
   # productName 是中文时，默认会写出「截屏OCR Setup 0.2.1.exe」，而清单里写的是

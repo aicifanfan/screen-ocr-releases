@@ -196,7 +196,7 @@ npm run dist
 
 ## 更新日志
 
-### 0.2.3（未发布 · 修复「切换识别精度不生效」）
+### 0.2.3（2026-10-19 · 修复「切换识别精度不生效」）
 
 **根因**：`src/main/config.js` 的 `update()` 用 `Object.assign(load(), partial)` 就地改写缓存对象；
 `settings:set` 在 `update()` **之后**才比较 `partial.ocrProfile !== old.ocrProfile`，

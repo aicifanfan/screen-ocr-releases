@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.2.3（未发布，修复档位切换）
-status: 0.2.2 已发布；0.2.3 修复「切档位不生效」根因（config 对象被就地改写）；档位链路 10 项 PASS
-next: 打包发布 0.2.3（用户当前需重启才能让 balanced 生效）
+version: 0.2.3（已发布）
+status: 0.2.3 已打包并发布 v0.2.3（4 个资产，含免安装 zip）；档位链路 10 项 + 结果页 43 项全 PASS
+next: 无必做项；可选：代码签名（消除 SmartScreen 提示）
 derived_from: process/2026-10-19_process.log.md
 ---
 
@@ -18,7 +18,8 @@ derived_from: process/2026-10-19_process.log.md
 
 **「切均衡还是慢」的根因已定位并修复**：`config.update()` 就地改写缓存对象，导致 `settings:set` 里
 「档位是否变化」永远判 false，切换从未到达 OCR 引擎（全日志 0 条「档位切换」）。
-同图实测 accurate 24.0s vs balanced 1.6s（15×）。修复后档位链路 10 项 PASS，全量回归通过；0.2.3 未打包。
+同图实测 accurate 24.0s vs balanced 1.6s（15×）。修复后档位链路 10 项 PASS，全量回归通过；
+**0.2.3 已打包并发布**（`v0.2.3`，4 个资产含免安装 zip，latest 指向 v0.2.3）。
 （0.2.2 及更早可先重启应用让 balanced 生效。）
 
 ## §1 关键结论
@@ -75,7 +76,7 @@ derived_from: process/2026-10-19_process.log.md
 | **T10** | **性能定位与健壮性（0.2.2）** | **已完成（P-15）** | T1–T9 | `index.js`、`ocr-bridge.js`、`result.js`、`overlay.*`、i18n | 主进程阻塞归零；窗口 413→131ms；超时/重试/坏图全测 |
 | **T11** | 打包发布 0.2.2 | **已完成（P-16）** | T10 | `dist/`、Release | v0.2.2 已建，3 个资产 201；latest → v0.2.2 |
 | **T12** | **修复「切档位不生效」（0.2.3）** | **已完成（P-17）** | T10 | `config.js`、`index.js`、`ocr-bridge.js`、新增测试 | 档位链路 10 项 PASS；同图 24.0s→1.6s |
-| **T13** | 打包发布 0.2.3 | 未开始 | T12 | `dist/`、Release | 用户当前只能靠重启生效 |
+| **T13** | 打包发布 0.2.3 | **已完成（P-18）** | T12 | `dist/`、Release | v0.2.3 已建，4 个资产 201（含 zip）；latest → v0.2.3；CDN 下载复核通过 |
 
 > 风险最高的是 T1：编辑、复制全文、多屏分组、连续截图刷新都要回归。建议单独提交 + 打 tag。
 
@@ -110,7 +111,7 @@ derived_from: process/2026-10-19_process.log.md
 | **F7** | `src/renderer/result.js` | 25,835 B / 703 行 | 已改：骨架/空状态/占位/浮条/兜底定时器/pending/坏图回退 |
 | **F8** | `tests/test_result_ui.js` | 17,943 B / 341 行 | 已改：**43 项**断言 |
 | **F9** | `docs/screenshots/design-*.png` | 8 张 | 本轮效果留档（宽/选中/加载/空/窄/720/设置 540/设置 440 EN） |
-| **F10** | `dist/screen-ocr-setup-0.2.1.exe`、`dist/截屏OCR-0.2.1-win.zip`、`dist/latest.yml`、`dist/SHA256SUMS-0.2.1.txt` | 175 MB / 224 MB / 349 B | **0.2.1 分发产物**；清单 url 与文件名一致 |
+| **F10** | `dist/screen-ocr-setup-0.2.3.exe`、`dist/screen-ocr-0.2.3-win.zip`、`dist/latest.yml`、`dist/SHA256SUMS-0.2.3.txt` | 272 MB / 323 MB / 349 B | **0.2.3 分发产物**；安装包与 zip 均 ASCII 命名，4 个资产已上传 |
 | **F11** | `src/renderer/styles/tokens.css` | 2,795 B / 87 行 | 新建：令牌单一来源 |
 | **F12** | `src/renderer/styles/base.css` | 2,186 B / 85 行 | 新建：reset / `::selection` / 滚动条 / reduced-motion |
 | **F13** | `src/renderer/styles/components.css` | 9,545 B / 398 行 | 新建：按钮/胶囊/卡片/开关/下拉/空状态/骨架/浮条 |
