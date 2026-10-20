@@ -7,6 +7,7 @@
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+const { isValidProfile } = require('../shared/profiles')
 
 // 超时可被环境变量覆盖：自动化测试用小值，避免真的等 25s/90s
 const READY_TIMEOUT = Number(process.env.SCREEN_OCR_READY_TIMEOUT) || 25000
@@ -222,7 +223,8 @@ class OcrBridge {
   /** 运行时切换识别档位（fast / balanced / accurate），无需重启 sidecar */
   async setProfile(profile) {
     const p = String(profile || '').trim().toLowerCase()
-    if (!['fast', 'balanced', 'accurate'].includes(p) || p === this.profile) return false
+    // 档位白名单来自 shared/profiles（新增档位只改那一处）
+    if (!isValidProfile(p) || p === this.profile) return false
     if (!this.proc) { this.profile = p; return true } // 尚未启动：下次 init 会用新档位
 
     // 关键：只有引擎确认后才改 this.profile。

@@ -9,6 +9,7 @@ const { copyText } = require('./clipboard')
 const { getAll, update } = require('./config')
 const { setup: setupUpdater, checkForUpdates } = require('./updater')
 const I18n = require('../shared/i18n')
+const { DEFAULT_PROFILE, normalizeProfile } = require('../shared/profiles')
 const log = require('./log')
 const fs = require('fs')
 const { execFile } = require('child_process')
@@ -193,14 +194,13 @@ function bindRefinedHandler() {
       log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
         'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
     }
-    if (resultWin && !resultWin.isDestroyed() && resultWinReady) {
-      resultWin.webContents.send('result:update', resultData)
-    }
+    // 精修包同样走 pushResultToWindow：页面没就绪时由 did-finish-load 补推
+    pushResultToWindow(resultData)
   }
 }
 // OCR 档位来自配置（默认 balanced：实测比默认参数快 9.4x，CER 从 9.09% 降到 2.16%）
-let ocrProfile = 'balanced'
-try { ocrProfile = getAll().ocrProfile || 'balanced' } catch { /* 配置不可读用默认 */ }
+let ocrProfile = DEFAULT_PROFILE
+try { ocrProfile = normalizeProfile(getAll().ocrProfile) } catch { /* 配置不可读用默认 */ }
 const ocr = new OcrBridge(ocrProfile)
 bindRefinedHandler() // 必须在 ocr 初始化之后绑定（见函数上的注释）
 
@@ -264,15 +264,12 @@ function destroyOverlay() {
 // 因此这里不再复用，保证每次都是干净界面。
 // 关键：跨屏超大窗口会被 Chromium 收缩到单屏工作区，故拆成「一块屏一个窗口」，
 //       并在创建后 setBounds 纠正构造时被收缩到 workArea 的高度（保证盖满含任务栏）。
-function showOverlay(cap) {
+// 建窗口 + 加载 overlay.html（异步）。返回的窗口还没显示、也没有截图数据。
+function createOverlayWindows(displays) {
   const myGen = ++overlayGeneration // 本代标识：异步 reveal 时校验，过期则放弃显示
-
-  // 先彻底清理上一次的窗口与拖拽状态，避免任何残留
-  destroyOverlay()
-  log.info('遮罩：已清理旧窗口，新建 ' + cap.displays.length + ' 个窗口')
-
-  for (let i = 0; i < cap.displays.length; i++) {
-    const d = cap.displays[i]
+  const wins = []
+  for (let i = 0; i < displays.length; i++) {
+    const d = displays[i]
     const win = new BrowserWindow({
       frame: false,
       // 不透明窗口：遮罩页本就铺满全屏截图，不需要透出桌面。
@@ -315,13 +312,21 @@ function showOverlay(cap) {
       }
     })
     overlayWins.push(win)
+    wins.push(win)
   }
-  overlayLayoutKey = currentLayoutKey(cap)
+  return { wins, gen: myGen }
+}
 
-  // 推数据并显示
+// 推送截图并显示（等页面加载完再推，避免消息早于监听器）。
+function revealOverlayWindows(prepared, cap) {
+  const { wins, gen: myGen } = prepared
+  overlayLayoutKey = currentLayoutKey(cap)
   for (let i = 0; i < cap.displays.length; i++) {
-    const win = overlayWins[i]
+    const win = wins[i] || overlayWins[i]
     if (!win || win.isDestroyed()) continue
+    // 截图后以真实几何再校正一次（窗口创建时用的是截图前的显示器几何）
+    const d = cap.displays[i]
+    if (d) win.setBounds({ x: d.physX, y: d.physY, width: d.pxWidth, height: d.pxHeight }, false)
 
     const payload = { displays: cap.displays, physVirtual: cap.physVirtual, myIndex: i }
     const reveal = () => {
@@ -337,6 +342,14 @@ function showOverlay(cap) {
   }
 }
 
+// 兜底路径：没有并行预建时（例如异常回退），按老方式一次做完
+function showOverlay(cap) {
+  destroyOverlay()
+  log.info('遮罩：已清理旧窗口，新建 ' + cap.displays.length + ' 个窗口')
+  revealOverlayWindows(createOverlayWindows(cap.displays), cap)
+}
+
+
 // 关闭遮罩：直接销毁窗口并清空全部状态（不再隐藏复用，避免残留到下一次截屏）
 function closeOverlay() {
   overlayGeneration++ // 让未完成的 reveal 过期，避免关闭后又被异步 show 回来
@@ -349,9 +362,25 @@ function closeOverlay() {
 //   1) 避免加载期的白屏闪烁；
 //   2) OCR 进行中就可以先把窗口建好（见 capture:region），结果一到直接显示，
 //      不再让用户多等一次页面加载（实测 ~560ms）。
-let resultWinReady = false     // 页面是否已完成加载
+let resultWinReady = false     // 窗口是否已可显示（ready-to-show）
+let resultWinLoaded = false    // 页面脚本是否已跑完（did-finish-load）——推数据看这个
 let resultPending = false      // OCR 是否仍在进行（结果为 null 时区分「还没来」与「确实没有」）
 let showResultOnReady = false  // 数据先到、页面还没加载完：加载完成后自动显示
+
+// 把结果推给结果页。页面脚本没跑完就先不发（会丢），等 did-finish-load 再补。
+// 之前用的是 ready-to-show：预加载窗口在隐藏状态下它可能晚于结果到达，
+// 结果被丢掉 → 页面停在骨架屏。OCR 越快越容易撞上（fast 档最明显）。
+function pushResultToWindow(payload) {
+  if (!resultWin || resultWin.isDestroyed()) return false
+  if (!resultWinLoaded) return false
+  try {
+    resultWin.webContents.send('result:update', payload)
+    return true
+  } catch (e) {
+    log.warn('推送结果失败: ' + (e && e.message))
+    return false
+  }
+}
 
 function createResultWindow() {
   resultWin = new BrowserWindow({
@@ -363,6 +392,7 @@ function createResultWindow() {
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=' + currentLang] }
   })
   resultWinReady = false
+  resultWinLoaded = false
   resultWin.loadFile(path.join(__dirname, '..', 'renderer', 'result.html'))
   // 加载失败 / 渲染进程崩溃必须留痕，否则表现为「识别完成但没有窗口」
   resultWin.webContents.on('did-fail-load', (_e, code, desc, url) => {
@@ -370,6 +400,12 @@ function createResultWindow() {
   })
   resultWin.webContents.on('render-process-gone', (_e, det) => {
     log.error('结果页渲染进程退出: reason=' + det.reason + ' exitCode=' + det.exitCode)
+  })
+  // 页面脚本就绪：这是「可以安全推数据」的最早时刻。
+  // 顺手补推一次当前结果（预加载窗口 + OCR 很快完成时，结果会早于这里到达）。
+  resultWin.webContents.on('did-finish-load', () => {
+    resultWinLoaded = true
+    if (resultData) pushResultToWindow(resultData)
   })
   resultWin.once('ready-to-show', () => {
     resultWinReady = true
@@ -383,6 +419,7 @@ function createResultWindow() {
   resultWin.on('closed', () => {
     resultWin = null
     resultWinReady = false
+    resultWinLoaded = false
     showResultOnReady = false
   })
   return resultWin
@@ -493,6 +530,9 @@ async function onCapture() {
   const t0 = Date.now()
   log.info('onCapture 开始')
   try {
+    // 说明：曾试过「建窗口与截图并行」省时间，实测无收益（1309ms vs 1320ms）——
+    // 两者都排在主进程的 Chromium 任务队列里，并行只是换了个顺序；
+    // 真实开销是 desktopCapturer.getSources 本身（约 0.6–1.0s），只能换截图策略。
     const cap = await captureAllScreens()
     log.info('捕获完成: ' + cap.displays.length + ' 屏 +' + (Date.now() - t0) + 'ms | ' +
       cap.displays.map((d) => d.pxWidth + 'x' + d.pxHeight + '@' + (d.dataUrl || '').length + 'B').join(', '))
@@ -500,6 +540,8 @@ async function onCapture() {
     log.info('遮罩显示完成 +' + (Date.now() - t0) + 'ms')
   } catch (e) {
     log.error('截图失败: ' + (e && e.stack ? e.stack : e))
+    // 失败必须收尾：否则可能留下一排隐藏窗口占资源
+    try { destroyOverlay() } catch { /* 已清理 */ }
   }
 }
 
@@ -587,8 +629,8 @@ ipcMain.handle('show:result', (_e, payload) => {
   }
 
   if (resultWin && !resultWin.isDestroyed()) {
-    // 预加载窗口：直接推数据（页面可能还在加载，加载完会自己 getResult 再渲染）
-    if (resultWinReady) resultWin.webContents.send('result:update', payload)
+    // 预加载窗口：页面已就绪就直接推；还没就绪则由 did-finish-load 补推（不会丢）
+    pushResultToWindow(payload)
     openResultWindow()
   } else {
     createResultWindow()
@@ -634,13 +676,18 @@ ipcMain.handle('settings:set', (_e, partial) => {
 
     // 应用 OCR 档位（运行时切换，无需重启）
     // 必须在写配置之前判断：写配置会改变缓存，之后再比就永远相等了（历史 bug）
-    if (partial.ocrProfile && partial.ocrProfile !== old.ocrProfile) {
-      ocr.setProfile(partial.ocrProfile)
+    // 档位取值统一走 shared/profiles：非法值归一化，而不是把脏值丢给引擎
+    const nextProfile = partial.ocrProfile ? normalizeProfile(partial.ocrProfile, old.ocrProfile) : ''
+    if (nextProfile && nextProfile !== old.ocrProfile) {
+      partial.ocrProfile = nextProfile
+      ocr.setProfile(nextProfile)
         .then((ok) => {
-          log.info('OCR 档位切换 -> ' + partial.ocrProfile + '：' +
+          log.info('OCR 档位切换 -> ' + nextProfile + '：' +
             (ok ? '成功' : '失败（引擎未确认，仍为 ' + ocr.profile + '）'))
         })
         .catch((e) => log.error('OCR 档位切换异常: ' + (e && e.message)))
+    } else if (partial.ocrProfile) {
+      partial.ocrProfile = nextProfile || old.ocrProfile
     }
 
     // 写入配置

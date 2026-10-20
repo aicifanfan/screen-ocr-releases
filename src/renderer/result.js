@@ -747,7 +747,11 @@ async function init() {
 
   // 主进程还在识别：保持骨架屏，等 result:update 推结果过来。
   // 这里必须区分「还没来」和「确实没有」，否则会先闪一下"未识别到文字"。
-  if (result && result.pending) return
+  if (result && result.pending) {
+    // 兜底：万一批量推送丢了（窗口刚建好、主进程判定未就绪），主动重试几次
+    waitForPendingResult()
+    return
+  }
 
   if (!result || !(result.screens && result.screens.length) && !(result.texts && result.texts.length)) {
     renderEmpty()
@@ -756,9 +760,34 @@ async function init() {
   render(result)
 }
 
+// pending 期间的兜底轮询：主进程正常会推 result:update，这里防「推丢了」导致一直骨架屏。
+// 退避到 1.5s 后维持低频，直到拿到结果或收到推送（onUpdate 会把 pendingTries 置为已解决）。
+let pendingTries = 0
+let pendingResolved = false
+const PENDING_DELAYS = [120, 200, 350, 600, 1000, 1500]
+
+async function waitForPendingResult() {
+  while (!pendingResolved && pendingTries < 12) {
+    const delay = PENDING_DELAYS[Math.min(pendingTries, PENDING_DELAYS.length - 1)]
+    pendingTries += 1
+    await new Promise((r) => setTimeout(r, delay))
+    if (pendingResolved) return
+    let r = null
+    try { r = await window.api.getResult() } catch { r = null }
+    if (pendingResolved) return
+    if (r && r.pending) continue
+    pendingResolved = true
+    const hasContent = r && ((r.screens && r.screens.length) || (r.texts && r.texts.length))
+    if (hasContent) render(r)
+    else renderEmpty()
+    return
+  }
+}
+
 // 连续截图 / 精修完成：主进程推送新结果，直接刷新
 window.api.onUpdate((payload) => {
   if (!payload || !((payload.screens && payload.screens.length) || (payload.texts && payload.texts.length))) return
+  pendingResolved = true // 推送到了，停掉 pending 兜底轮询
   // 新一次截图：之前攒着的「精修替换」已经过期，直接丢掉，否则会把新结果顶掉
   if (payload.newResult === true) {
     deferredPayload = null

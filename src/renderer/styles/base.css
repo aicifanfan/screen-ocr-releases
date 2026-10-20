@@ -72,6 +72,13 @@ body.is-selecting {
   cursor: text;
 }
 
+/* hidden 属性必须真的隐藏。
+   .pill / .btn 等组件把 display 写成了 inline-flex，会覆盖 hidden 的默认 display:none ——
+   结果是「JS 里 hidden=true，界面上仍然看得见」（精修提示曾因此在所有档位常驻）。 */
+[hidden] {
+  display: none !important;
+}
+
 /* 尊重系统「减少动态效果」：动效归零，但保留可见的状态变化 */
 @media (prefers-reduced-motion: reduce) {
   *,

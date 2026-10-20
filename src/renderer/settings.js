@@ -165,7 +165,8 @@ btnSave.addEventListener('click', async () => {
     autoCloseAfterCopy: optAutoClose.checked,
     autoCheckUpdate: optAutoCheck.checked,
     disableGpu: !optGpu.checked,
-    ocrProfile: optOcrProfile.value
+    // 档位白名单来自 shared/profiles.js（新增档位只改那一处）
+    ocrProfile: window.Profiles ? window.Profiles.normalizeProfile(optOcrProfile.value) : optOcrProfile.value
   }
   try {
     const result = await window.api.setSettings(partial)
@@ -238,7 +239,7 @@ async function init() {
   optAutoClose.checked = cfg.autoCloseAfterCopy !== false
   optAutoCheck.checked = cfg.autoCheckUpdate !== false
   optGpu.checked = cfg.disableGpu === false // 默认关闭：只有显式设为 false 才启用 GPU
-  optOcrProfile.value = cfg.ocrProfile || 'balanced'
+  optOcrProfile.value = window.Profiles ? window.Profiles.normalizeProfile(cfg.ocrProfile) : (cfg.ocrProfile || 'balanced')
   optLanguage.value = I18n.normalizeSetting(cfg.language)
 
   // 首次渲染：先用主进程注入的语言，配置里的语言以主进程为准（避免不一致）

@@ -507,6 +507,47 @@ app.whenReady().then(async () => {
   check('看门狗：超时未更新自动收起提示', afterWatchdog.chipHidden === true)
   check('看门狗：收起提示不影响已上屏的文本', afterWatchdog.first === '看门狗第一行', afterWatchdog.first)
 
+  // —— 15. 精修提示「真的隐藏」：hidden 属性必须真的不占位（.pill 的 display 会覆盖 hidden） ——
+  const chipStyle = await winProg.webContents.executeJavaScript(`(function(){
+    const el = document.getElementById('refining');
+    return { hidden: el.hidden, display: getComputedStyle(el).display };
+  })()`)
+  check('精修提示非精修状态：hidden=true 且计算样式为 none',
+    chipStyle.hidden === true && chipStyle.display === 'none', JSON.stringify(chipStyle))
+
+  // —— 16. pending 兜底：推送丢了也要靠轮询把内容拉回来（fast 档预加载窗口的经典竞态） ——
+  ipcMain.removeHandler('result:get')
+  let pendingCalls = 0
+  ipcMain.handle('result:get', () => {
+    pendingCalls++
+    if (pendingCalls <= 2) return { pending: true } // 前两次模拟「结果还没到」
+    return {
+      screens: [{
+        seq: 9100,
+        label: '',
+        image,
+        texts: ['轮询第一行', '轮询第二行'],
+        boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+        scores: [0.9, 0.9]
+      }]
+    }
+  })
+  const winPoll = new BrowserWindow({
+    show: false, width: 900, height: 640,
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, additionalArguments: ['--app-lang=zh'] }
+  })
+  await winPoll.loadFile(RESULT)
+  await waitFor(winPoll, `document.querySelectorAll('.item').length === 2`, 5000)
+  const pollState = await winPoll.webContents.executeJavaScript(`({
+    items: document.querySelectorAll('.item').length,
+    first: (document.querySelectorAll('.item')[0] || {}).textContent,
+    chipDisplay: getComputedStyle(document.getElementById('refining')).display
+  })`)
+  check('pending 兜底：轮询后渲染出内容', pollState.items === 2 && pollState.first === '轮询第一行',
+    'items=' + pollState.items + ' first=' + pollState.first)
+  check('pending 兜底：没有残留「精修中」提示', pollState.chipDisplay === 'none', pollState.chipDisplay)
+  check('pending 兜底：确实经历了 3 次 getResult', pendingCalls >= 3, 'calls=' + pendingCalls)
+
   console.log(pass ? '[ALL PASS] 结果页视觉与交互验证通过' : '[FAIL] 存在未通过项')
   if (!pass) process.exitCode = 1
   app.quit()
