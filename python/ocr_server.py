@@ -98,17 +98,86 @@ def _cascade_maxratio():
     return min(max(v, 0.1), 1.0)
 
 
+def _clamp_threads(v):
+    """线程数夹紧到「至少 1、至多 cpu-2」：侧车与 Electron 抢 CPU 时 UI 更容易卡。"""
+    cpu = os.cpu_count() or 4
+    return max(1, min(int(v), max(1, cpu - 2), 32))
+
+
 def _threads():
-    """推理线程数：默认「留 2 核给 UI/系统，上限 24」，可用 SCREEN_OCR_THREADS 覆盖。
+    """全局推理线程数：默认「留 2 核给 UI/系统，上限 16」，可用 SCREEN_OCR_THREADS 覆盖。
 
     为什么不是 -1（让 ORT 自己决定）：-1 会按物理核开线程，小图上线程调度开销反而变大；
-    为什么留 2 核：侧车与 Electron 主进程/渲染进程抢 CPU 时，UI 更容易卡。
+    为什么上限从 24 降到 16：实测（1707×1067 真实屏幕，48 个识别框）
+        det  small  8→781ms  16→588ms  24→936ms  32→1084ms
+        rec  small  8→678ms  12→595ms  16→766ms  24→1782ms 32→3385ms
+        rec  medium 12→740ms 16→598ms  24→679ms  32→732ms
+    线程开过头的代价是「线程同步开销 > 并行收益」，24 线程下 small rec 慢了 3 倍。
+    16 是三者都不差的值；真正的甜点用 _apply_module_threads 按模块分别设。
     """
     raw = (os.environ.get(ENV_THREADS) or "").strip()
     if raw.isdigit() and int(raw) > 0:
-        return max(1, min(int(raw), 64))
-    cpu = os.cpu_count() or 4
-    return max(2, min(cpu - 2, 24))
+        return _clamp_threads(int(raw))
+    return _clamp_threads(16)
+
+
+# 各模块的线程甜点（实测见 _threads 注释）。det 与小模型的张量小，线程多了纯亏。
+# medium 的张量大：12→740ms、16→598ms、24→679ms，交错 A/B 端到端也一致（16 线程 8.8–9.0s vs 24 线程 9.9–10.0s）。
+DEFAULT_THREADS_DET = 16
+DEFAULT_THREADS_REC_SMALL = 12
+DEFAULT_THREADS_REC_MEDIUM = 16
+
+
+def _module_threads(env_key, default):
+    """按模块读线程数：环境变量优先，未设置用默认值，并夹紧到安全范围。"""
+    raw = (os.environ.get(env_key) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return _clamp_threads(int(raw))
+    return _clamp_threads(default)
+
+
+def _threads_det():
+    return _module_threads("SCREEN_OCR_THREADS_DET", DEFAULT_THREADS_DET)
+
+
+def _threads_rec_small():
+    return _module_threads("SCREEN_OCR_THREADS_REC", DEFAULT_THREADS_REC_SMALL)
+
+
+def _threads_rec_medium():
+    return _module_threads("SCREEN_OCR_THREADS_MEDIUM", DEFAULT_THREADS_REC_MEDIUM)
+
+
+def _rec_kind(profile):
+    if profile == "fast":
+        return "tiny"
+    if profile == "accurate":
+        # 渐进/级联模式下主引擎先跑 small，非渐进时直接是 medium
+        return "small" if (_progressive_on(profile) or _cascade_on(profile)) else "medium"
+    return "small"
+
+
+def _apply_module_threads(engine, det_thr=None, rec_thr=None):
+    """给 det / rec 各自的 ORT 会话设不同线程数。
+
+    rapidocr 的 EngineConfig 是全局的：Det.engine_cfg 与 Rec.engine_cfg 指向同一份 dict。
+    session 只在「懒加载」时读一次线程数，所以顺序是「先按 det 的线程数建 det 会话，
+    再改成 rec 的线程数建 rec 会话」，建好之后互不影响。
+    任何异常都静默退回全局线程数（行为与旧版一致），不让这个优化影响可用性。
+    """
+    try:
+        ort_cfg = engine.cfg.EngineConfig["onnxruntime"]
+        original = ort_cfg.get("intra_op_num_threads", _threads())
+        if det_thr:
+            ort_cfg["intra_op_num_threads"] = _clamp_threads(det_thr)
+            engine._load_det_model()
+        if rec_thr:
+            ort_cfg["intra_op_num_threads"] = _clamp_threads(rec_thr)
+            engine._load_rec_model()
+        ort_cfg["intra_op_num_threads"] = original
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _model_type(name):
@@ -348,18 +417,24 @@ def main():
 
     def new_engine(p):
         try:
-            return RapidOCR(params=build_params(p)), p
+            eng = RapidOCR(params=build_params(p))
+            # 按模块设线程：det 与小模型 rec 用更少的线程（实测 small rec 在 24 线程下慢 3 倍）
+            _apply_module_threads(eng, _threads_det(),
+                                  _threads_rec_small() if _rec_kind(p) != "medium" else _threads_rec_medium())
+            return eng, p
         except Exception as exc:  # noqa: BLE001
             # 例如 accurate 档的 medium 模型未随包分发且当前无网络下载 → 回退 balanced
             if p != "balanced":
                 _emit({"type": "warn", "message": "档位 %s 不可用(%s)，已回退 balanced" % (p, exc)})
-                return RapidOCR(params=build_params("balanced")), "balanced"
+                eng = RapidOCR(params=build_params("balanced"))
+                _apply_module_threads(eng, _threads_det(), _threads_rec_small())
+                return eng, "balanced"
             raise
 
     t0 = time.perf_counter()
     engine, profile = new_engine(profile)
 
-    # 级联模式下的「精修」识别器（只在 accurate + cascade 时才真正加载 medium rec）
+    # 级联/渐进模式下的「精修」识别器（只在 accurate 时才真正加载 medium rec）
     precise = {"engine": None}
 
     def get_precise():
@@ -367,6 +442,8 @@ def main():
             params = build_params("accurate")
             params["Rec.model_type"] = _model_type("medium")
             holder = RapidOCR(params=params)
+            # medium 需要更多线程：单独建会话，走 THREADS_REC_MEDIUM
+            _apply_module_threads(holder, None, _threads_rec_medium())
             precise["engine"] = holder._load_rec_model()
         return precise["engine"]
 
@@ -378,7 +455,8 @@ def main():
         except Exception:  # noqa: BLE001
             pass
     _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
-           "warmup_ms": warm_ms, "threads": _threads(),
+           "warmup_ms": warm_ms, "threads": _threads(), "threads_det": _threads_det(),
+           "threads_rec": _threads_rec_small() if _rec_kind(profile) != "medium" else _threads_rec_medium(),
            "cascade": _cascade_on(profile), "progressive": _progressive_on(profile)})
 
     for line in sys.stdin:
