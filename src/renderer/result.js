@@ -200,6 +200,7 @@ function renderEmpty() {
   mainEl.innerHTML = ''
   mainEl.appendChild(createEmptyState(true))
   updateRefiningChip()
+  armRefiningWatchdog()
 }
 
 // 核心：根据结果渲染（首次打开与连续截图刷新共用）
@@ -278,6 +279,7 @@ function renderAll() {
     })
   }
   updateRefiningChip()
+  armRefiningWatchdog()
 }
 
 // 「精修中…」提示：只在两段式渐进的第一段上屏后显示，流式精修时带进度
@@ -289,6 +291,25 @@ function updateRefiningChip() {
   refiningEl.textContent = p && p.total
     ? t('result.refiningProgress', { done: p.done, total: p.total })
     : t('result.refining')
+}
+
+// 兜底：精修提示长时间没有更新就自动收起。
+// 正常情况由 final 包收起；这里防的是「消息丢了 / sidecar 异常退出」导致提示永远挂着——
+// 用户看到的就是「一直卡在精修」。
+// 阈值可用 window.__refiningWatchdogMs 覆盖（测试用）。
+let refiningWatchdog = 0
+function armRefiningWatchdog() {
+  clearTimeout(refiningWatchdog)
+  refiningWatchdog = 0
+  if (!refining) return
+  const ms = typeof window.__refiningWatchdogMs === 'number' ? window.__refiningWatchdogMs : 30000
+  refiningWatchdog = setTimeout(() => {
+    if (!refining) return
+    refining = false
+    refineProgress = null
+    updateRefiningChip()
+    console.warn('[result] 精修提示超过 ' + ms + 'ms 没有更新，已自动收起')
+  }, ms)
 }
 
 // 窗口从宽改窄时按新宽度重算图片缩放：否则图片保持旧尺寸，出现横向溢出、识别框错位。
@@ -738,6 +759,12 @@ async function init() {
 // 连续截图 / 精修完成：主进程推送新结果，直接刷新
 window.api.onUpdate((payload) => {
   if (!payload || !((payload.screens && payload.screens.length) || (payload.texts && payload.texts.length))) return
+  // 新一次截图：之前攒着的「精修替换」已经过期，直接丢掉，否则会把新结果顶掉
+  if (payload.newResult === true) {
+    deferredPayload = null
+    clearTimeout(deferredTimer)
+    deferredTimer = 0
+  }
   if (shouldDefer(payload)) { deferSwap(payload); return }
   render(payload)
 })
@@ -751,7 +778,9 @@ function hasLiveSelection() {
 }
 
 function shouldDefer(payload) {
-  // 只有「精修完成」的整段替换需要让路；换语言、连续截图更新等照常刷新
+  // 只有「精修替换」需要给选区让路；新一次截图（newResult）必须立刻生效，
+  // 否则切到均衡后，窗口还停在上一轮高精度的「精修中」状态。
+  if (payload.newResult === true) return false
   return refining && payload.refined === true && hasLiveSelection()
 }
 

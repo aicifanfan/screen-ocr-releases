@@ -435,6 +435,78 @@ app.whenReady().then(async () => {
   check('渐进：精修完成后隐藏提示', afterRefine.chipHidden === true)
   check('渐进：替换后行数不变（不丢行）', afterRefine.items === 2, 'items=' + afterRefine.items)
 
+  // —— 13. 新一次截图（如切到均衡后再截）：即使正在选字，也必须立刻替换 ——
+  // 先回到「精修中」状态：这是关键前提，旧代码会把紧接着的新截图当成「精修替换」而延后
+  await winProg.webContents.send('result:update', {
+    newResult: true,
+    provisional: true,
+    refined: false,
+    refiningDone: false,
+    screens: [{
+      seq: 9001,
+      label: '',
+      image,
+      texts: ['高精度临时一', '高精度临时二'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.8, 0.8]
+    }]
+  })
+  await waitFor(winProg, `document.getElementById('refining').hidden === false`, 1500)
+  await winProg.webContents.executeJavaScript(`(function(){
+    const item = document.querySelectorAll('.item')[0];
+    const r = document.createRange(); r.selectNodeContents(item);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    return true;
+  })()`)
+  await sleep(120)
+  await winProg.webContents.send('result:update', {
+    newResult: true,
+    provisional: false,
+    refined: true,
+    refiningDone: true,
+    screens: [{
+      seq: 9002,
+      label: '',
+      image,
+      texts: ['均衡第一行', '均衡第二行'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.9, 0.9]
+    }]
+  })
+  await waitFor(winProg, `(document.querySelectorAll('.item')[0] || {}).textContent === '均衡第一行'`, 2000)
+  const afterNewResult = await winProg.webContents.executeJavaScript(`({
+    first: (document.querySelectorAll('.item')[0] || {}).textContent,
+    chipHidden: document.getElementById('refining').hidden
+  })`)
+  check('新截图：选中文字时也立刻替换（不延后）', afterNewResult.first === '均衡第一行', afterNewResult.first)
+  check('新截图：不继承上一次的「精修中」提示', afterNewResult.chipHidden === true)
+
+  // —— 14. 看门狗：精修提示长时间没更新要自动收起（防消息丢失） ——
+  await winProg.webContents.executeJavaScript(`(function(){ window.__refiningWatchdogMs = 300; return true })()`)
+  await winProg.webContents.send('result:update', {
+    newResult: true,
+    provisional: true,
+    refined: false,
+    refiningDone: false,
+    screens: [{
+      seq: 9003,
+      label: '',
+      image,
+      texts: ['看门狗第一行', '看门狗第二行'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.8, 0.8]
+    }]
+  })
+  await waitFor(winProg, `document.getElementById('refining').hidden === false`, 1000)
+  check('看门狗：临时结果上屏时提示正常显示', true)
+  await waitFor(winProg, `document.getElementById('refining').hidden === true`, 2000)
+  const afterWatchdog = await winProg.webContents.executeJavaScript(`({
+    chipHidden: document.getElementById('refining').hidden,
+    first: (document.querySelectorAll('.item')[0] || {}).textContent
+  })`)
+  check('看门狗：超时未更新自动收起提示', afterWatchdog.chipHidden === true)
+  check('看门狗：收起提示不影响已上屏的文本', afterWatchdog.first === '看门狗第一行', afterWatchdog.first)
+
   console.log(pass ? '[ALL PASS] 结果页视觉与交互验证通过' : '[FAIL] 存在未通过项')
   if (!pass) process.exitCode = 1
   app.quit()

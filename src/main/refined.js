@@ -16,7 +16,13 @@ function applyRefined(payload, msg) {
   if (!payload || !Array.isArray(payload.screens) || !msg) return false
   const screens = payload.screens
   let idx = screens.findIndex((s) => s && s.seq != null && s.seq === msg.seq)
-  if (idx < 0) idx = screens.length === 1 ? 0 : -1 // 单屏场景兜底
+  if (idx < 0) {
+    // 兜底只针对「结果里根本没有 seq」（老数据/纯文本结果）的单屏场景。
+    // 如果结果带 seq 但对不上，说明这条精修属于上一次截图 —— 必须丢掉，
+    // 否则会把新截图的内容替换成上一张的文本，甚至把「精修中」状态挂到新结果上。
+    const hasSeq = screens.some((s) => s && s.seq != null)
+    if (!hasSeq && screens.length === 1) idx = 0
+  }
   if (idx < 0) return false
 
   const s = screens[idx]

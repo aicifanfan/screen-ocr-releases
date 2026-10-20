@@ -58,6 +58,16 @@ function payloadWith(texts, seq = 7) {
   check('多屏不匹配：不修改数据', JSON.stringify(p) === before)
 }
 
+// 5b) 单屏但 seq 对不上（新一次截图已替换数据）→ 必须丢弃，不能覆盖新结果
+{
+  const p = { screens: [{ seq: 6, texts: ['新一', '新二'] }] }
+  const ok = applyRefined(p, { seq: 5, texts: ['旧一', '旧二', '旧三'], done: 3, total: 3, final: true })
+  check('单屏 seq 不匹配：返回 false（旧精修不污染新截图）', ok === false)
+  check('单屏 seq 不匹配：新结果文本保持不变', JSON.stringify(p.screens[0].texts) === JSON.stringify(['新一', '新二']),
+    JSON.stringify(p.screens[0].texts))
+  check('单屏 seq 不匹配：不会把 refiningDone 挂上去', p.refiningDone === undefined)
+}
+
 // 6) 单屏兜底：结果里没有 seq 也能合并
 {
   const p = { screens: [{ texts: ['x'] }] }

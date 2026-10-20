@@ -571,6 +571,11 @@ ipcMain.handle('show:result', (_e, payload) => {
   const first = payload.screens[0] || {}
   payload.provisional = first.stage === 'provisional'
   payload.refined = !payload.provisional
+  // 新一次截图：必须把上一次遗留的「精修中」状态清掉，
+  // 否则切到均衡（根本没有精修）时，结果页可能还挂着上一次高精度的提示。
+  payload.refiningDone = !payload.provisional
+  payload.refineProgress = null
+  payload.newResult = true // 渲染层据此判断「这是新截图，不是精修替换」，不要延后应用
   resultData = payload
   resultPending = false
 
