@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.3.3（已实现，未打包）
-status: 0.3.3 精修分批流式推送：第一段准确文本 105.5s→6.8s（全屏 100 行），总时长持平；协议/合并/UI 共 85 项断言全 PASS
-next: 打包发布 0.3.3；可选：OpenVINO EP / 蒸馏
+version: 0.3.4（已实现，未打包）
+status: 0.3.4 修复「均衡超时、高精度反而快」：非映射错误，是精修阻塞队列；新请求 102s→2.4s
+next: 打包发布 0.3.4（含 0.3.2/0.3.3）；可选：OpenVINO EP / 蒸馏
 derived_from: process/2026-10-19_process.log.md
 ---
 

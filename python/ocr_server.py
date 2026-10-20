@@ -18,7 +18,9 @@ import json
 import base64
 import io
 import os
+import queue
 import re
+import threading
 import time
 
 import numpy as np
@@ -253,13 +255,16 @@ def _refine_chunk_size():
     return DEFAULT_REFINE_CHUNK
 
 
-def emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise):
+def emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise, pending=None):
     """分批用 medium 精修，边算边推 —— 不必等全部行算完才让用户看到准确文本。
 
     每批推一条 refined：texts 是「当前累计」的完整数组（行数从头到尾不变，
     这样主进程/渲染层的选中位置不会错乱），done/total 表示进度，
     final=True 的那条表示精修结束，UI 据此收起「精修中」。
     第一批固定更小（最多 4 行）：用户从上往下读，先让顶部几行变准。
+
+    pending：可选回调，返回 True 表示「队列里已经有新请求在等」。
+    每批之间检查一次，有就提前收尾——否则一次长精修会把下一次截图/切档位卡到超时。
     """
     total = len(texts)
     t_ref = time.perf_counter()
@@ -289,6 +294,11 @@ def emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_pre
     done = 0
     try:
         while done < total:
+            # 有新请求在排队（下一次截图 / 切档位）→ 立刻收尾让路，剩下的行保持小模型结果
+            if pending and pending():
+                _emit({"type": "warn", "message": "有新的请求在等待，本轮精修提前收尾（已完成 %d/%d 行）" % (done, total)})
+                send(done, True, done > 0)
+                return
             end = min(done + (first if done == 0 else chunk), total)
             recompute_lines(arr, texts, scores, quads, get_precise(), range(done, end))
             done = end
@@ -515,7 +525,24 @@ def main():
            "threads_rec": _threads_rec_small() if _rec_kind(profile) != "medium" else _threads_rec_medium(),
            "cascade": _cascade_on(profile), "progressive": _progressive_on(profile)})
 
-    for line in sys.stdin:
+    # stdin 用独立线程读进队列，主线程只从队列取。
+    # 原因：精修（medium 全量重算）可能要几十秒，若主线程直接阻塞在 sys.stdin 的 for 循环里，
+    # 这期间到来的「切换档位 / 下一次截图」全部排队 —— 实测一次 97 行精修会把后续请求卡住 102 秒，
+    # 直接撞上主进程 90 秒的请求超时（用户看到「识别超时」，且误以为是档位问题）。
+    # 有队列之后，精修每批之间可以检查「有没有新请求在等」，有就立即收尾让路。
+    inbox = queue.Queue()
+
+    def _reader():
+        try:
+            for raw in sys.stdin:
+                inbox.put(raw)
+        except Exception:  # noqa: BLE001
+            pass
+        inbox.put(None)  # EOF
+
+    threading.Thread(target=_reader, name="stdin-reader", daemon=True).start()
+
+    for line in iter(inbox.get, None):
         line = line.strip()
         if not line:
             continue
@@ -574,7 +601,8 @@ def main():
                 })
 
                 if progressive:
-                    emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise)
+                    emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise,
+                                       pending=lambda: not inbox.empty())
             except Exception as exc:  # noqa: BLE001
                 _emit({"type": "error", "seq": seq, "message": str(exc)})
 
