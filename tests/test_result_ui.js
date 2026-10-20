@@ -376,26 +376,55 @@ app.whenReady().then(async () => {
     return true;
   })()`)
   await sleep(150)
-  const refinedPayload = {
+  // 流式精修的第一批（只替换了第一行，还没算完）
+  const partialPayload = {
     provisional: false,
     refined: true,
+    refiningDone: false,
+    refineProgress: { done: 1, total: 2 },
     screens: [{
       seq: 9001,
       label: '',
       image,
-      texts: ['最终第一行', '临时第二行'],
+      texts: ['中间第一行', '临时第二行'],
       boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
       scores: [0.99, 0.9]
     }]
   }
-  await winProg.webContents.send('result:update', refinedPayload)
+  await winProg.webContents.send('result:update', partialPayload)
   await sleep(320)
   const whileSelecting = await winProg.webContents.executeJavaScript(
     `(document.querySelectorAll('.item')[0] || {}).textContent`)
   check('渐进：选中中推送精修 → 暂不替换（文字不跳）', whileSelecting === '临时第一行', whileSelecting)
 
-  // 收起选区 → 立刻换上最终结果，提示消失
+  // 收起选区 → 立刻换上这批结果，但「精修中」提示要留着（后面还有批次）
   await winProg.webContents.executeJavaScript(`(function(){ window.getSelection().removeAllRanges(); return true })()`)
+  await waitFor(winProg, `(document.querySelectorAll('.item')[0] || {}).textContent === '中间第一行'`, 2000)
+  const afterPartial = await winProg.webContents.executeJavaScript(`({
+    first: (document.querySelectorAll('.item')[0] || {}).textContent,
+    chipHidden: document.getElementById('refining').hidden,
+    chipText: document.getElementById('refining').textContent.trim()
+  })`)
+  check('流式：选区收起后换上这一批结果', afterPartial.first === '中间第一行', afterPartial.first)
+  check('流式：批次到达后提示仍显示（未收尾）', afterPartial.chipHidden === false)
+  check('流式：提示带进度 1/2', afterPartial.chipText.indexOf('1/2') >= 0, afterPartial.chipText)
+
+  // 最后一批：全部替换 + 收起提示
+  const refinedPayload = {
+    provisional: false,
+    refined: true,
+    refiningDone: true,
+    refineProgress: { done: 2, total: 2 },
+    screens: [{
+      seq: 9001,
+      label: '',
+      image,
+      texts: ['最终第一行', '最终第二行'],
+      boxes: [[0, 0, 300, 100], [0, 100, 300, 200]],
+      scores: [0.99, 0.99]
+    }]
+  }
+  await winProg.webContents.send('result:update', refinedPayload)
   await waitFor(winProg, `(document.querySelectorAll('.item')[0] || {}).textContent === '最终第一行'`, 2000)
   const afterRefine = await winProg.webContents.executeJavaScript(`({
     first: (document.querySelectorAll('.item')[0] || {}).textContent,

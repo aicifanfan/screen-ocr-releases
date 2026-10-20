@@ -10,6 +10,8 @@ let hasResult = false // 是否有识别结果（用于语言切换后重绘空�
 
 // 两段式渐进：临时结果已上屏、最终结果还没来
 let refining = false
+// 流式精修进度（{ done, total }）：拿到就显示「精修中 12/64」，没有就只显示「精修中…」
+let refineProgress = null
 let deferredPayload = null // 用户正在选字时先攒着，等选区收起再替换
 let deferredTimer = 0
 
@@ -194,6 +196,7 @@ function endLoading() {
 function renderEmpty() {
   endLoading()
   refining = false // 没有内容时不该挂「精修中」
+  refineProgress = null
   mainEl.innerHTML = ''
   mainEl.appendChild(createEmptyState(true))
   updateRefiningChip()
@@ -246,8 +249,10 @@ function render(result) {
   })
 
   hasResult = true
-  // 两段式渐进：临时结果（provisional）先上屏，并挂「精修中…」提示
-  refining = result.provisional === true
+  // 两段式渐进：临时结果（provisional）先上屏，并挂「精修中…」提示；
+  // 流式精修会分批推送（refiningDone=false），提示要一直挂到最后一个 final 包。
+  refining = result.provisional === true || result.refiningDone === false
+  refineProgress = result.refineProgress || null
   renderAll()
 }
 
@@ -275,11 +280,15 @@ function renderAll() {
   updateRefiningChip()
 }
 
-// 「精修中…」提示：只在两段式渐进的第一段上屏后显示
+// 「精修中…」提示：只在两段式渐进的第一段上屏后显示，流式精修时带进度
 function updateRefiningChip() {
   if (!refiningEl) return
   refiningEl.hidden = !refining
-  if (refining) refiningEl.textContent = t('result.refining')
+  if (!refining) return
+  const p = refineProgress
+  refiningEl.textContent = p && p.total
+    ? t('result.refiningProgress', { done: p.done, total: p.total })
+    : t('result.refining')
 }
 
 // 窗口从宽改窄时按新宽度重算图片缩放：否则图片保持旧尺寸，出现横向溢出、识别框错位。

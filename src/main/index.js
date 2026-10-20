@@ -169,29 +169,8 @@ let tray = null
 let resultData = null // 最近一次识别结果
 const pendingRefined = new Map() // seq -> 精修结果（show:result 还没到就先存着）
 
-// 两段式渐进：把最终结果合并进最近一次结果，并推给结果窗口。
-// 只替换 texts/scores（检测框不变），保持行数一致，避免用户选中位置错乱。
-function applyRefined(payload, msg) {
-  if (!payload || !Array.isArray(payload.screens) || !msg) return false
-  const screens = payload.screens
-  let idx = screens.findIndex((s) => s && s.seq != null && s.seq === msg.seq)
-  if (idx < 0) idx = screens.length === 1 ? 0 : -1 // 单屏场景兜底
-  if (idx < 0) return false
-
-  const s = screens[idx]
-  if (Array.isArray(msg.texts) && msg.texts.length === (s.texts || []).length) {
-    s.texts = msg.texts
-    if (Array.isArray(msg.scores)) s.scores = msg.scores
-  } else if (Array.isArray(msg.texts) && msg.texts.length) {
-    // 行数变了（理论上不会，检测没重跑）：整体替换，宁可牺牲选中位置也不显示旧文本
-    s.texts = msg.texts
-    if (Array.isArray(msg.scores)) s.scores = msg.scores
-  }
-  payload.refined = true
-  payload.provisional = false
-  payload.refinedLines = msg.refined === false ? 0 : (msg.lines || 0)
-  return true
-}
+// 两段式渐进：把精修结果合并进最近一次结果（实现见 ./refined.js，纯函数便于单测）。
+const { applyRefined } = require('./refined')
 
 // 精修结果由 sidecar 异步推送：更新缓存并刷新窗口。
 // 注意：这个赋值必须放在 `const ocr = new OcrBridge(...)` **之后**，
@@ -209,8 +188,11 @@ function bindRefinedHandler() {
       pendingRefined.set(msg.seq, msg)
       return
     }
-    log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
-      'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
+    // 流式精修会推很多条，只有最后一条值得写日志（否则日志被刷屏）
+    if (msg.final !== false) {
+      log.info('OCR 精修完成: ' + (msg.lines || 0) + ' 行 | 精修耗时 ' + (msg.refine_ms || '?') +
+        'ms | 端到端 ' + (msg.elapse_ms || '?') + 'ms')
+    }
     if (resultWin && !resultWin.isDestroyed() && resultWinReady) {
       resultWin.webContents.send('result:update', resultData)
     }

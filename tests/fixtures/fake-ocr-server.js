@@ -31,13 +31,19 @@ process.stdin.on('data', (d) => {
       continue
     }
     if (msg.type === 'recognize') {
-      // 渐进模式：先回临时结果，200ms 后再推最终结果（模拟两段式）
+      // 渐进模式：先回临时结果，再分两批推精修（模拟流式精修：先 1 行，再收尾）
       if (mode === 'progressive') {
         send({ type: 'result', seq: msg.seq, stage: 'provisional', texts: ['fast-1', 'fast-2'],
           boxes: [[0, 0, 10, 10], [0, 10, 10, 20]], scores: [0.8, 0.8], elapse_ms: 5, profile: 'accurate' })
         setTimeout(() => {
+          send({ type: 'refined', seq: msg.seq, texts: ['precise-1', 'fast-2'], scores: [0.99, 0.8],
+            refined: true, lines: 2, done: 1, total: 2, final: false,
+            refine_ms: 90, elapse_ms: 120, profile: 'accurate' })
+        }, 80)
+        setTimeout(() => {
           send({ type: 'refined', seq: msg.seq, texts: ['precise-1', 'precise-2'], scores: [0.99, 0.99],
-            refined: true, lines: 2, refine_ms: 180, elapse_ms: 200, profile: 'accurate' })
+            refined: true, lines: 2, done: 2, total: 2, final: true,
+            refine_ms: 180, elapse_ms: 200, profile: 'accurate' })
         }, 200)
         continue
       }
@@ -45,7 +51,8 @@ process.stdin.on('data', (d) => {
       if (mode === 'progressive-empty') {
         send({ type: 'result', seq: msg.seq, stage: 'provisional', texts: [], boxes: [], scores: [], elapse_ms: 3, profile: 'accurate' })
         setTimeout(() => {
-          send({ type: 'refined', seq: msg.seq, texts: [], scores: [], refined: false, lines: 0, refine_ms: 1, elapse_ms: 10, profile: 'accurate' })
+          send({ type: 'refined', seq: msg.seq, texts: [], scores: [], refined: false, lines: 0,
+            done: 0, total: 0, final: true, refine_ms: 1, elapse_ms: 10, profile: 'accurate' })
         }, 80)
         continue
       }

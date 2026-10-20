@@ -65,9 +65,11 @@ ENV_CASCADE = "SCREEN_OCR_CASCADE"
 ENV_CASCADE_THRESH = "SCREEN_OCR_CASCADE_THRESH"
 ENV_CASCADE_MAXRATIO = "SCREEN_OCR_CASCADE_MAXRATIO"
 ENV_PROGRESSIVE = "SCREEN_OCR_PROGRESSIVE"
+ENV_REFINE_CHUNK = "SCREEN_OCR_REFINE_CHUNK"
 
 DEFAULT_CASCADE_THRESH = 0.90   # 低于此分数的行用 medium 重跑
 DEFAULT_CASCADE_MAXRATIO = 0.5  # 最多重跑一半的行（超过说明整图都不可信，重跑不划算）
+DEFAULT_REFINE_CHUNK = 8        # 流式精修每批多少行（第一批另算，见 emit_refine_stream）
 
 
 def _cascade_on(profile):
@@ -241,6 +243,60 @@ def warmup(engine):
     except Exception:  # noqa: BLE001
         return None
     return round((time.perf_counter() - t0) * 1000, 1)
+
+
+def _refine_chunk_size():
+    """流式精修每批行数：默认 8，可用 SCREEN_OCR_REFINE_CHUNK 覆盖。"""
+    raw = (os.environ.get(ENV_REFINE_CHUNK) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return max(1, min(int(raw), 64))
+    return DEFAULT_REFINE_CHUNK
+
+
+def emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise):
+    """分批用 medium 精修，边算边推 —— 不必等全部行算完才让用户看到准确文本。
+
+    每批推一条 refined：texts 是「当前累计」的完整数组（行数从头到尾不变，
+    这样主进程/渲染层的选中位置不会错乱），done/total 表示进度，
+    final=True 的那条表示精修结束，UI 据此收起「精修中」。
+    第一批固定更小（最多 4 行）：用户从上往下读，先让顶部几行变准。
+    """
+    total = len(texts)
+    t_ref = time.perf_counter()
+
+    def send(done, final, refined):
+        _emit({
+            "type": "refined",
+            "seq": seq,
+            "texts": [postprocess_text(t) for t in texts],
+            "scores": list(scores),
+            "profile": profile,
+            "refined": refined,
+            "lines": total,
+            "done": done,
+            "total": total,
+            "final": final,
+            "refine_ms": round((time.perf_counter() - t_ref) * 1000, 1),
+            "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
+        })
+
+    if total == 0 or not quads:
+        send(0, True, False)  # 空结果也要推最终包，否则 UI 永远停在「精修中」
+        return
+
+    chunk = _refine_chunk_size()
+    first = max(1, min(4, chunk))
+    done = 0
+    try:
+        while done < total:
+            end = min(done + (first if done == 0 else chunk), total)
+            recompute_lines(arr, texts, scores, quads, get_precise(), range(done, end))
+            done = end
+            send(done, done >= total, True)
+    except Exception as exc:  # noqa: BLE001
+        # 精修中断也要收尾（否则 UI 停在「精修中」），已完成批次照常生效
+        _emit({"type": "warn", "message": "精修中断(%s)，保留已完成的部分" % exc})
+        send(done, True, done > 0)
 
 
 def parse_output(res):
@@ -518,25 +574,7 @@ def main():
                 })
 
                 if progressive:
-                    final_texts = list(texts)
-                    final_scores = list(scores)
-                    refined_n, refined_ms = 0, 0.0
-                    if quads and final_texts:
-                        refined_n, refined_ms = recompute_lines(
-                            arr, final_texts, final_scores, quads, get_precise(),
-                            range(len(final_texts)))
-                        final_texts = [postprocess_text(t) for t in final_texts]
-                    _emit({
-                        "type": "refined",
-                        "seq": seq,
-                        "texts": final_texts,
-                        "scores": final_scores,
-                        "profile": profile,
-                        "refined": refined_n > 0,
-                        "lines": len(final_texts),
-                        "refine_ms": refined_ms,
-                        "elapse_ms": round((time.perf_counter() - t_start) * 1000, 1),
-                    })
+                    emit_refine_stream(arr, seq, profile, texts, scores, quads, t_start, get_precise)
             except Exception as exc:  # noqa: BLE001
                 _emit({"type": "error", "seq": seq, "message": str(exc)})
 
