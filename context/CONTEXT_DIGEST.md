@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.3.5（已修复，未打包）
-status: 0.3.5 修复「均衡截屏后一直卡在精修」：新截图被误判为精修替换而延后；结果页 57 项 + 合并 22 项全 PASS
-next: 打包发布 0.3.5
+version: 0.3.5（已发布）
+status: 0.3.5 已发布并归档全部历史版本（GitHub 9 个 Release / 5.14GB）；本地旧包已清理，项目 8.5GB→2.6GB
+next: 无必做项；候选项：OpenVINO EP / 蒸馏 / 代码签名
 derived_from: process/2026-10-19_process.log.md
 ---
 
