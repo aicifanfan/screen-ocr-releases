@@ -196,6 +196,43 @@ npm run dist
 
 ## 更新日志
 
+### 0.3.7（2026-10-21 · 识别改用 GPU 推理（DirectML））
+
+**变化**：识别不再固定跑 CPU。默认 `auto` —— 有显卡就用 GPU（Windows 上走 DirectML，NVIDIA / AMD / Intel 都行），
+用不了自动回落 CPU。设置页新增「识别加速：自动（推荐） / 仅 CPU」。
+
+**实测**（同机同图，交错对比）
+
+| 场景 | CPU | GPU（DirectML） | 加速 |
+|---|---:|---:|---:|
+| 均衡档（2560×1600 / 17 行） | 754 ms | **217 ms** | 3.5× |
+| 精修（medium 全量 17 行） | 26.5 s | **307 ms** | **86×** |
+| 高精度档端到端（包内侧车） | 2611 ms | **442 ms** | 5.9× |
+
+**精度**：10 张测试图、99 行文本，CPU 与 GPU **逐行完全一致（100%）**。
+`tests/perf/cpu-gpu-parity.py` 作为上线门禁，差异率不为 0 就不允许上 GPU。
+
+**改动**
+
+| 位置 | 内容 |
+|---|---|
+| `python/ocr_server.py` | 新增 `pick_device()`（auto/cpu/dml/cuda）；`build_params(profile, device)` 只切 provider 不动模型；**建会话失败自动回落 CPU**；`ready` 上报 `device / device_requested / device_fallback / device_reason` |
+| `src/shared/devices.js`（新） | 设备白名单与归一化（与档位表解耦） |
+| `src/main/config.js` | 新增 `gpuAccel`（默认 auto），非法值归一化 |
+| `src/main/ocr-bridge.js` | spawn 传 `SCREEN_OCR_DEVICE`；`ready` 记录实际设备；新增 `setDevice()`（需重启子进程） |
+| `src/main/index.js` | 启动读取设备；设置变更时重启识别进程；日志打印「推理设备 dml」 |
+| `src/renderer/settings.*` | 新增「识别加速」下拉；中英文案 |
+| `scripts/build-py.js` | 依赖换 `onnxruntime-directml==1.20.1`；打包后校验 `DirectML.dll` 是否进包 |
+| `tests/test_devices.js`（新） | 10 项：白名单/归一化/设置页一致/i18n |
+| `tests/perf/cpu-gpu-parity.py`（新） | CPU vs GPU 逐行对拍 |
+
+**注意**
+
+- 安装包 240 MB → **约 272 MB**（运行时 33 → 65 MB）；
+- 首次启动预热变慢：CPU 66 ms → GPU **2673 ms**（DirectML 首次编译算子图），发生在启动阶段；
+- 「识别加速」与设置里原有的「GPU 硬件加速（界面）」是两件事：前者管推理，后者管拖拽/渲染；
+- 老驱动、虚拟机、远程桌面下 GPU 可能不可用 → 自动回落 CPU，日志会写 `device_reason`。
+
 ### 0.3.6（2026-10-20 · 修复「快速档卡死 / 各档位看不出差别」）
 
 **症状**：快速档经常卡在「骨架屏 + 精修中…」，均衡/高精度反而看起来差不多。

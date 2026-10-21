@@ -82,6 +82,10 @@
       'settings.autoClose.desc': '复制文字后关闭结果窗口，便于直接粘贴',
       'settings.gpu.label': 'GPU 硬件加速（实验性）',
       'settings.gpu.desc': '关闭时走兼容模式（更稳定，默认开启）；开启后框选拖拽更流畅，但个别显卡驱动可能导致启动失败（崩溃后会自动降级）',
+      'settings.device.label': '识别加速',
+      'settings.device.desc': '自动：有独立显卡就用 GPU 推理（精修快 10 倍以上），不可用时自动回落 CPU；仅 CPU：省电、排障时使用',
+      'settings.device.auto': '自动（推荐）',
+      'settings.device.cpu': '仅 CPU',
 
       // 设置页：关于与更新
       'settings.card.about': '关于与更新',
@@ -204,6 +208,10 @@
       'settings.autoClose.desc': 'Close the result window after copying so you can paste right away',
       'settings.gpu.label': 'GPU acceleration (experimental)',
       'settings.gpu.desc': 'Off uses compatibility mode (more stable, default). On gives smoother dragging, but some GPU drivers may prevent startup (auto-fallback after a crash).',
+      'settings.device.label': 'Recognition acceleration',
+      'settings.device.desc': 'Auto uses the GPU when available (over 10x faster refine) and falls back to CPU automatically; CPU only saves power and helps troubleshooting',
+      'settings.device.auto': 'Auto (recommended)',
+      'settings.device.cpu': 'CPU only',
 
       'settings.card.about': 'About & updates',
       'settings.version.label': 'Current version',

@@ -3,6 +3,7 @@ const { app } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const { DEFAULT_PROFILE, normalizeProfile } = require('../shared/profiles')
+const { DEFAULT_DEVICE, normalizeDevice } = require('../shared/devices')
 
 // 配置结构版本：用于一次性迁移旧配置
 // v2：取消「启动时自动截屏」的默认行为（程序启动后必须由用户主动触发才截屏）
@@ -15,6 +16,7 @@ const DEFAULTS = {
   autoCloseAfterCopy: true,             // 复制后自动关闭结果窗口
   autoCheckUpdate: true,                // 启动时自动检查更新
   ocrProfile: DEFAULT_PROFILE,          // OCR 档位：取值见 src/shared/profiles.js
+  gpuAccel: DEFAULT_DEVICE,             // 识别设备：auto(有GPU就用)/cpu(仅CPU)，见 src/shared/devices.js
   disableGpu: true,                     // 兼容模式（默认开启）：关闭 GPU 加速，保证启动稳定；
                                         // 关闭此项即启用 GPU 硬件加速（拖拽更流畅，但个别显卡驱动可能崩溃）
   language: 'auto'                      // 界面语言：auto(跟随系统) / zh / en；非法值按 auto 处理
@@ -46,6 +48,7 @@ function load() {
   cache = Object.assign({}, DEFAULTS, parsed)
   // 档位是枚举：手改坏的配置不能让引擎拿到非法值（会静默回退 balanced，看起来像"切换无效"）
   cache.ocrProfile = normalizeProfile(cache.ocrProfile)
+  cache.gpuAccel = normalizeDevice(cache.gpuAccel)
 
   // 一次性迁移：老版本默认「启动即截屏」为 true，v2 起强制关闭，
   // 避免程序一启动就自动弹出截屏遮罩。

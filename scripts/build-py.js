@@ -20,7 +20,7 @@ function run(args, label) {
     if (PY === 'python') {
       console.error('[build-py] 建议先建 venv：')
       console.error('  uv venv .venv-perf --python 3.12')
-      console.error('  uv pip install --python .venv-perf/Scripts/python.exe rapidocr==3.10.0 onnxruntime==1.20.1 numpy==2.5.4 onnx pyinstaller')
+      console.error('  uv pip install --python .venv-perf/Scripts/python.exe rapidocr==3.10.0 onnxruntime-directml==1.20.1 numpy==2.5.4 onnx pyinstaller')
     }
     process.exit(1)
   }
@@ -44,5 +44,17 @@ run([
 
 // 构建后必须同步模型（含 INT8 覆盖与 yaml 哈希对齐），否则产物不可用
 run(['python/tools/sync_models.py'], 'sync_models')
+
+// 校验 DirectML 运行时是否真的进了包（漏了就是「启动即失败」，且很难看出原因）
+const ortDir = path.join(ROOT, 'python', 'ocr_pkg', 'ocr_server', '_internal', 'onnxruntime', 'capi')
+// DirectML EP 编在 onnxruntime.dll 里，额外只需 DirectML.dll（早期误写成 providers_dml.dll，会误报）
+const need = ['DirectML.dll', 'onnxruntime_providers_shared.dll']
+const missing = need.filter((f) => !fs.existsSync(path.join(ortDir, f)))
+if (missing.length) {
+  console.warn('[build-py] 警告：onnxruntime/capi 里缺少 ' + missing.join('、') +
+    '（GPU 加速将不可用，会自动回落 CPU）')
+} else {
+  console.log('[build-py] DirectML 运行时就位')
+}
 
 console.log('[build-py] 完成 -> python/ocr_pkg/ocr_server')

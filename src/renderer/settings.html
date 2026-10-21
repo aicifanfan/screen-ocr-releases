@@ -121,6 +121,18 @@
           </label>
         </div>
       </div>
+      <div class="row">
+        <div class="meta">
+          <div class="label" data-i18n="settings.device.label"></div>
+          <div class="desc" data-i18n="settings.device.desc"></div>
+        </div>
+        <div class="ctl">
+          <select class="select" id="opt-device">
+            <option value="auto" data-i18n="settings.device.auto"></option>
+            <option value="cpu" data-i18n="settings.device.cpu"></option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -159,6 +171,7 @@
 
   <script src="../shared/i18n.js"></script>
   <script src="../shared/profiles.js"></script>
+  <script src="../shared/devices.js"></script>
   <script src="accelerator.js"></script>
   <script src="settings.js"></script>
 </body>

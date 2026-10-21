@@ -10,6 +10,7 @@ const { getAll, update } = require('./config')
 const { setup: setupUpdater, checkForUpdates } = require('./updater')
 const I18n = require('../shared/i18n')
 const { DEFAULT_PROFILE, normalizeProfile } = require('../shared/profiles')
+const { normalizeDevice } = require('../shared/devices')
 const log = require('./log')
 const fs = require('fs')
 const { execFile } = require('child_process')
@@ -202,6 +203,8 @@ function bindRefinedHandler() {
 let ocrProfile = DEFAULT_PROFILE
 try { ocrProfile = normalizeProfile(getAll().ocrProfile) } catch { /* 配置不可读用默认 */ }
 const ocr = new OcrBridge(ocrProfile)
+// 推理设备（auto：有 GPU 就用 DirectML，失败由 sidecar 自己回落 CPU）
+try { ocr.device = normalizeDevice(getAll().gpuAccel) } catch { /* 用默认 auto */ }
 bindRefinedHandler() // 必须在 ocr 初始化之后绑定（见函数上的注释）
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js')
@@ -690,6 +693,20 @@ ipcMain.handle('settings:set', (_e, partial) => {
       partial.ocrProfile = nextProfile || old.ocrProfile
     }
 
+    // 应用推理设备（auto / cpu）：设备是 spawn 时通过环境变量传的，必须重启 sidecar
+    if (partial.gpuAccel !== undefined) {
+      const nextDevice = normalizeDevice(partial.gpuAccel, old.gpuAccel)
+      partial.gpuAccel = nextDevice
+      if (nextDevice !== old.gpuAccel) {
+        log.info('推理设备切换 -> ' + nextDevice + '（重启识别进程）')
+        ocr.setDevice(nextDevice)
+          .then((ok) => {
+            log.info('推理设备切换完成：实际 ' + (ocr.deviceActual || 'cpu') + (ok ? '' : '（未变化）'))
+          })
+          .catch((e) => log.error('推理设备切换异常: ' + (e && e.message)))
+      }
+    }
+
     // 写入配置
     update(partial)
 
@@ -738,7 +755,8 @@ app.whenReady().then(() => {
 
   // 预热 OCR 模型，避免首次截图卡顿
   ocr.init()
-    .then(() => log.info('OCR 就绪：实际档位 ' + ocr.profile))
+    .then(() => log.info('OCR 就绪：实际档位 ' + ocr.profile + ' | 推理设备 ' + (ocr.deviceActual || 'cpu') +
+      (ocr.device !== 'auto' ? '（配置：' + ocr.device + '）' : '')))
     .catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
 
   // 预热系统缩放读取：把 ~1s 的外部进程调用挪到启动阶段（异步，不阻塞窗口）

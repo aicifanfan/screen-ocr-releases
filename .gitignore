@@ -38,3 +38,5 @@ python/ocr_pkg_backup/
 python/models_src/
 python/models_int8/
 python/ocr_pkg_prev_*/
+.venv-dml/
+.venv-dml/

@@ -68,6 +68,9 @@ ENV_CASCADE_THRESH = "SCREEN_OCR_CASCADE_THRESH"
 ENV_CASCADE_MAXRATIO = "SCREEN_OCR_CASCADE_MAXRATIO"
 ENV_PROGRESSIVE = "SCREEN_OCR_PROGRESSIVE"
 ENV_REFINE_CHUNK = "SCREEN_OCR_REFINE_CHUNK"
+# 推理设备：auto（默认，有 GPU 就用）/ cpu / dml（DirectML，Windows 任意显卡）/ cuda
+ENV_DEVICE = "SCREEN_OCR_DEVICE"
+DEVICES = ("auto", "cpu", "dml", "cuda")
 
 DEFAULT_CASCADE_THRESH = 0.90   # 低于此分数的行用 medium 重跑
 DEFAULT_CASCADE_MAXRATIO = 0.5  # 最多重跑一半的行（超过说明整图都不可信，重跑不划算）
@@ -193,7 +196,36 @@ def _model_type(name):
         return name
 
 
-def build_params(profile):
+def pick_device():
+    """选推理设备，返回 (device, requested, reason)。
+
+    - auto（默认）：优先 DirectML（Windows 上任何显卡通用），其次 CUDA，最后 CPU；
+    - cpu：用户显式选择「仅 CPU」；
+    - dml / cuda：用户点名要的，不可用时回落 CPU 并说明原因。
+
+    任何异常都回落 cpu —— 加速不可用绝不能把识别打死（老驱动、虚拟机、远程桌面都可能没有 GPU provider）。
+    """
+    requested = (os.environ.get(ENV_DEVICE) or "auto").strip().lower()
+    if requested not in DEVICES:
+        requested = "auto"
+    if requested == "cpu":
+        return "cpu", requested, "用户选择仅 CPU"
+    try:
+        import onnxruntime as ort
+        avail = set(ort.get_available_providers())
+    except Exception as exc:  # noqa: BLE001
+        return "cpu", requested, "读取 provider 失败(%s)，回落 CPU" % exc
+
+    if requested in ("auto", "dml") and "DmlExecutionProvider" in avail:
+        return "dml", requested, "使用 DirectML"
+    if requested in ("auto", "cuda") and "CUDAExecutionProvider" in avail:
+        return "cuda", requested, "使用 CUDA"
+    if requested == "auto":
+        return "cpu", requested, "没有可用的 GPU provider（%s），使用 CPU" % sorted(avail)
+    return "cpu", requested, "请求 %s 但不可用（%s），回落 CPU" % (requested, sorted(avail))
+
+
+def build_params(profile, device="cpu"):
     threads = _threads()
     params = {
         "Global.use_cls": False,          # 跳过方向分类
@@ -204,6 +236,12 @@ def build_params(profile):
         "EngineConfig.onnxruntime.intra_op_num_threads": threads,
         "EngineConfig.onnxruntime.inter_op_num_threads": 1,
     }
+    # 设备只影响 provider，不动模型与阈值：同一档位在 CPU/GPU 上结果应当一致
+    if device == "dml":
+        params["EngineConfig.onnxruntime.use_dml"] = True
+    elif device == "cuda":
+        params["EngineConfig.onnxruntime.use_cuda"] = True
+        params["EngineConfig.onnxruntime.cuda_ep_cfg.device_id"] = 0
     if profile == "fast":
         params.update({
             "Det.limit_side_len": 736,
@@ -481,31 +519,39 @@ def main():
     if profile not in PROFILES:
         profile = "balanced"
 
-    def new_engine(p):
+    device, device_requested, device_reason = pick_device()
+
+    def _make(p, dev):
+        eng = RapidOCR(params=build_params(p, dev))
+        # 按模块设线程：det 与小模型 rec 用更少的线程（实测 small rec 在 24 线程下慢 3 倍）
+        _apply_module_threads(eng, _threads_det(),
+                              _threads_rec_small() if _rec_kind(p) != "medium" else _threads_rec_medium())
+        return eng
+
+    def new_engine(p, dev=None):
+        dev = dev or device
         try:
-            eng = RapidOCR(params=build_params(p))
-            # 按模块设线程：det 与小模型 rec 用更少的线程（实测 small rec 在 24 线程下慢 3 倍）
-            _apply_module_threads(eng, _threads_det(),
-                                  _threads_rec_small() if _rec_kind(p) != "medium" else _threads_rec_medium())
-            return eng, p
+            return _make(p, dev), p, dev
         except Exception as exc:  # noqa: BLE001
-            # 例如 accurate 档的 medium 模型未随包分发且当前无网络下载 → 回退 balanced
+            # ① 设备回落：GPU 建会话失败（老驱动/虚拟机/显存不足）→ 换 CPU 重试，档位不变
+            if dev != "cpu":
+                _emit({"type": "warn", "message": "GPU 加速不可用(%s)，已回落 CPU" % exc})
+                return _make(p, "cpu"), p, "cpu"
+            # ② 档位回落：例如 accurate 档的 medium 模型未随包分发且无网络下载 → balanced
             if p != "balanced":
                 _emit({"type": "warn", "message": "档位 %s 不可用(%s)，已回退 balanced" % (p, exc)})
-                eng = RapidOCR(params=build_params("balanced"))
-                _apply_module_threads(eng, _threads_det(), _threads_rec_small())
-                return eng, "balanced"
+                return _make("balanced", "cpu"), "balanced", "cpu"
             raise
 
     t0 = time.perf_counter()
-    engine, profile = new_engine(profile)
+    engine, profile, device = new_engine(profile)
 
     # 级联/渐进模式下的「精修」识别器（只在 accurate 时才真正加载 medium rec）
     precise = {"engine": None}
 
     def get_precise():
         if precise["engine"] is None:
-            params = build_params("accurate")
+            params = build_params("accurate", device)
             params["Rec.model_type"] = _model_type("medium")
             holder = RapidOCR(params=params)
             # medium 需要更多线程：单独建会话，走 THREADS_REC_MEDIUM
@@ -523,7 +569,11 @@ def main():
     _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
            "warmup_ms": warm_ms, "threads": _threads(), "threads_det": _threads_det(),
            "threads_rec": _threads_rec_small() if _rec_kind(profile) != "medium" else _threads_rec_medium(),
-           "cascade": _cascade_on(profile), "progressive": _progressive_on(profile)})
+           "cascade": _cascade_on(profile), "progressive": _progressive_on(profile),
+           # 设备信息：device 是实际生效的，requested 是用户/配置要的，reason 供日志排查
+           "device": device, "device_requested": device_requested,
+           "device_fallback": device != device_requested and device_requested != "auto",
+           "device_reason": device_reason})
 
     # stdin 用独立线程读进队列，主线程只从队列取。
     # 原因：精修（medium 全量重算）可能要几十秒，若主线程直接阻塞在 sys.stdin 的 for 循环里，
@@ -559,13 +609,13 @@ def main():
             p = str(req.get("profile") or "").strip().lower()
             if p in PROFILES and p != profile:
                 t0 = time.perf_counter()
-                engine, profile = new_engine(p)
+                engine, profile, device = new_engine(p)  # 切档保留当前设备，失败按原逻辑回落
                 precise["engine"] = None  # 档位变了，精修识别器要重建
                 warmup(engine)  # 切档后立刻预热，避免「切换后第一次识别」特别慢
-                _emit({"type": "profileChanged", "seq": seq, "profile": profile,
+                _emit({"type": "profileChanged", "seq": seq, "profile": profile, "device": device,
                        "init_ms": round((time.perf_counter() - t0) * 1000, 1)})
             else:
-                _emit({"type": "profileChanged", "seq": seq, "profile": profile, "init_ms": 0})
+                _emit({"type": "profileChanged", "seq": seq, "profile": profile, "device": device, "init_ms": 0})
             continue
 
         if kind == "recognize":

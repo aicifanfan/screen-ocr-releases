@@ -8,6 +8,7 @@ const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const { isValidProfile } = require('../shared/profiles')
+const { DEVICES } = require('../shared/devices')
 
 // 超时可被环境变量覆盖：自动化测试用小值，避免真的等 25s/90s
 const READY_TIMEOUT = Number(process.env.SCREEN_OCR_READY_TIMEOUT) || 25000
@@ -19,6 +20,8 @@ class OcrBridge {
     this.proc = null
     this.ready = false
     this.profile = profile || 'balanced' // fast / balanced / accurate
+    this.device = 'auto'      // auto / cpu / dml / cuda（spawn 时通过环境变量传给 sidecar）
+    this.deviceActual = null  // sidecar ready 里回报的实际设备（可能因不可用而回落）
     this.pending = new Map() // seq -> { resolve, reject }
     this.seq = 0
     this.onRefined = null // 两段式渐进：最终结果回调（msg => void）
@@ -56,8 +59,12 @@ class OcrBridge {
     const { cmd, args } = this._resolvePython()
     const proc = spawn(cmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      // 通过环境变量把识别档位传给 sidecar（balanced 为默认，速度/精度均衡）
-      env: { ...process.env, SCREEN_OCR_PROFILE: this.profile }
+      // 环境变量：档位（balanced 默认）+ 推理设备（auto：有 GPU 就用，失败由 sidecar 回落 CPU）
+      env: {
+        ...process.env,
+        SCREEN_OCR_PROFILE: this.profile,
+        SCREEN_OCR_DEVICE: this.device
+      }
     })
     this.proc = proc
     this.ready = false
@@ -108,6 +115,7 @@ class OcrBridge {
 
     if (msg.type === 'ready') {
       if (msg.profile) this.profile = msg.profile // 以引擎实际加载的档位为准（可能发生回退）
+      if (msg.device) this.deviceActual = msg.device // dml / cuda / cpu（可能因不可用回落）
       this.ready = true
       if (this._readyResolve) this._readyResolve()
       return
@@ -249,6 +257,23 @@ class OcrBridge {
       // 留一点时间让 sidecar 自己退出，超时再强杀
       setTimeout(() => { try { proc.kill() } catch { /* 已退出 */ } }, 500)
     }
+  }
+
+  /**
+   * 切换推理设备（auto / cpu / dml / cuda）。
+   * 设备是 spawn 时通过环境变量传的，所以必须重启子进程；返回是否发生了切换。
+   * 注意：重启期间的请求会以 E_OCR_CLOSED 失败，调用方（设置页）只在用户主动改设置时触发。
+   */
+  async setDevice(device) {
+    const d = String(device || '').trim().toLowerCase()
+    if (!DEVICES.includes(d) || d === this.device) return false
+    this.device = d
+    this.deviceActual = null
+    if (this.proc) {
+      this.close()
+      await this.init()
+    }
+    return true
   }
 }
 

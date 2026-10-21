@@ -9,6 +9,7 @@ const optCaptureLaunch = document.getElementById('opt-capture-launch')
 const optAutoClose = document.getElementById('opt-auto-close')
 const optAutoCheck = document.getElementById('opt-auto-check')
 const optGpu = document.getElementById('opt-gpu')
+const optDevice = document.getElementById('opt-device')
 const optOcrProfile = document.getElementById('opt-ocr-profile')
 const optLanguage = document.getElementById('opt-language')
 const appVersion = document.getElementById('app-version')
@@ -165,6 +166,7 @@ btnSave.addEventListener('click', async () => {
     autoCloseAfterCopy: optAutoClose.checked,
     autoCheckUpdate: optAutoCheck.checked,
     disableGpu: !optGpu.checked,
+    gpuAccel: window.Devices ? window.Devices.normalizeDevice(optDevice.value) : optDevice.value,
     // 档位白名单来自 shared/profiles.js（新增档位只改那一处）
     ocrProfile: window.Profiles ? window.Profiles.normalizeProfile(optOcrProfile.value) : optOcrProfile.value
   }
@@ -239,6 +241,7 @@ async function init() {
   optAutoClose.checked = cfg.autoCloseAfterCopy !== false
   optAutoCheck.checked = cfg.autoCheckUpdate !== false
   optGpu.checked = cfg.disableGpu === false // 默认关闭：只有显式设为 false 才启用 GPU
+  optDevice.value = window.Devices ? window.Devices.normalizeDevice(cfg.gpuAccel) : (cfg.gpuAccel || 'auto')
   optOcrProfile.value = window.Profiles ? window.Profiles.normalizeProfile(cfg.ocrProfile) : (cfg.ocrProfile || 'balanced')
   optLanguage.value = I18n.normalizeSetting(cfg.language)
 
