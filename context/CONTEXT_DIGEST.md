@@ -3,9 +3,9 @@ project: screen-ocr（截屏 OCR 工具 · Windows）
 scope: 结果页「文本选择界面」视觉与交互改造 + 设置页样式体系对齐
 env: Electron 31.7.7 / Chromium 126 / Windows 10-11 / 无打包器（<script>/<link> 直引）
 date: 2026-10-19
-version: 0.3.7（已实现，未打包）
-status: 0.3.7 识别改用 DirectML：均衡 3.5×、精修 86×、对拍 99 行 100% 一致；代价 +32MB 与预热 2.7s
-next: 打包发布 0.3.7；可选 P3 TensorRT
+version: 0.3.7（已发布）
+status: 0.3.7 已发布：识别走 DirectML（均衡 3.5×、精修 86×、对拍 100% 一致）
+next: 无必做项；可选：结构化识别（表格/竖排/公式）、macOS 适配、代码签名
 derived_from: process/2026-10-19_process.log.md
 ---
 
