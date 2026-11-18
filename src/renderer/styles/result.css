@@ -227,6 +227,13 @@ body {
   background: var(--tint-box);
   box-shadow: 0 0 0 2px var(--primary-ring);
 }
+/* 多选：与左侧文字行同步点亮（单击切换、持久状态） */
+.box.selected {
+  z-index: 1;
+  border: 2px solid var(--primary-hover);
+  background: var(--tint-box);
+  box-shadow: 0 0 0 2px var(--primary-ring);
+}
 
 /* ------------------------------------------------------------
    文字块
@@ -254,6 +261,18 @@ body {
 .item.active {
   background: var(--tint-link);
   box-shadow: inset 2px 0 0 var(--primary);
+}
+
+/* 多选（单击切换）：持久状态，比「联动指向」更明确 —— 淡底 + 左侧主色条 */
+.item.selected {
+  background: var(--tint-box);
+  box-shadow: inset 3px 0 0 var(--primary-hover);
+}
+
+/* 双击复制成功的一次性反馈（600ms 后移除）：不改过渡，避免与选区渲染抢帧 */
+.item.is-copied {
+  background: var(--tint-box);
+  box-shadow: inset 0 0 0 2px var(--primary);
 }
 
 /* 编辑根的焦点反馈由插入符承担：整块描边会像输入框，并与选区、联动抢视觉 */
@@ -288,10 +307,11 @@ body {
    拖拽态 / 触摸设备
    ------------------------------------------------------------ */
 /* 拖拽选字期间不再响应悬停：高亮只跟随选区，不跟随指针 */
-body.is-selecting .item:hover:not(.active) {
+/* 已选中（多选）的行/框保持自己的底色，不能被拖拽态清掉 */
+body.is-selecting .item:hover:not(.active):not(.selected) {
   background: transparent;
 }
-body.is-selecting .box:hover:not(.active) {
+body.is-selecting .box:hover:not(.active):not(.selected) {
   border-color: var(--box-border);
   background: transparent;
 }

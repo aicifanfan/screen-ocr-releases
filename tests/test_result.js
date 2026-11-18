@@ -71,12 +71,12 @@ app.whenReady().then(async () => {
     multi.items[0] === 2 && multi.items[1] === 1 &&
     multi.boxes[0] === 2 && multi.boxes[1] === 1
 
-  // 复制全文：应包含屏名与文字
+  // 复制全文：只含识别文字，不能带屏名（"主屏"/"Display 1" 之类都是界面标题）
   await win.webContents.executeJavaScript(`document.getElementById('btn-copy-all').click()`)
   await waitNode(() => copiedText !== null, '复制全文')
   console.log('[OK] 复制全文内容:', JSON.stringify(copiedText))
-  const copyOk = copiedText.includes('主屏') && copiedText.includes('副屏 1') && copiedText.includes('Hello') && copiedText.includes('你好世界')
-  console.log(copyOk ? '[PASS] 多屏复制全文拼接正确' : '[FAIL] 复制内容缺屏名/文字')
+  const copyOk = copiedText === 'Hello\nWorld\n你好世界'
+  console.log(copyOk ? '[PASS] 复制全文无屏名前缀' : '[FAIL] 复制全文含多余内容')
 
   // 双向联动（第 1 屏）
   const link = await win.webContents.executeJavaScript(`(function(){
@@ -91,6 +91,59 @@ app.whenReady().then(async () => {
     return { t2b, b2t };
   })()`)
   console.log('[OK] 多屏双向联动:', JSON.stringify(link))
+
+  // —— 多选：单击切换选中状态（无需修饰键）——
+  await sleep(400) // 超出双击判定窗口，保证下面的 click 都是独立的单击
+  const multiSel = await win.webContents.executeJavaScript(`(function(){
+    document.getElementById('auto-close').checked = false;
+    const g = document.querySelectorAll('.screen-group')[0];
+    const items = g.querySelectorAll('.item');
+    items[0].click();
+    const one = g.querySelectorAll('.item.selected').length;
+    const boxLit = g.querySelectorAll('.box.selected').length;
+    items[1].click();
+    const two = g.querySelectorAll('.item.selected').length;
+    items[0].click();
+    const back = g.querySelectorAll('.item.selected').length;
+    const restText = (g.querySelector('.item.selected') || {}).textContent || '';
+    return { one, boxLit, two, back, restText };
+  })()`)
+  console.log('[OK] 单击多选:', JSON.stringify(multiSel), '(期望 1/1/2/1, 剩 "World")')
+  const multiSelOk = multiSel.one === 1 && multiSel.boxLit === 1 && multiSel.two === 2 &&
+    multiSel.back === 1 && multiSel.restText === 'World'
+
+  // 「复制选中」按多选行取内容（没有划选文字时）
+  copiedText = null
+  await win.webContents.executeJavaScript(`document.getElementById('btn-copy-sel').click()`)
+  await waitNode(() => copiedText !== null, '复制选中（多选）')
+  console.log('[OK] 多选后复制选中:', JSON.stringify(copiedText), '(期望 "World")')
+  const selCopyOk = copiedText === 'World'
+
+  // —— 双击：复制该行，且不改变已有的多选状态（click + click + dblclick）——
+  await sleep(400)
+  copiedText = null
+  const dblState = await win.webContents.executeJavaScript(`(function(){
+    const g = document.querySelectorAll('.screen-group')[0];
+    const item = g.querySelectorAll('.item')[0];
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    item.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    return { selected: g.querySelectorAll('.item.selected').length };
+  })()`)
+  await waitNode(() => copiedText !== null, '双击复制该行')
+  console.log('[OK] 双击复制该行:', JSON.stringify(copiedText), '| 多选数不变:', dblState.selected)
+  const dblOk = copiedText === 'Hello' && dblState.selected === 1
+
+  // 双击右侧原图的识别框：复制对应行
+  copiedText = null
+  await win.webContents.executeJavaScript(`(function(){
+    const g = document.querySelectorAll('.screen-group')[0];
+    const box = g.querySelectorAll('.box')[0];
+    box.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  })()`)
+  await waitNode(() => copiedText !== null, '双击识别框复制')
+  console.log('[OK] 双击识别框复制:', JSON.stringify(copiedText), '(期望 "Hello")')
+  const dblBoxOk = copiedText === 'Hello'
 
   // —— 用例 B：旧单屏结构向后兼容 ——
   copiedText = null
@@ -109,7 +162,7 @@ app.whenReady().then(async () => {
   console.log('[OK] 旧结构兼容：文字块', legacy.items, '(期望 3), 识别框', legacy.boxes, '(期望 3)')
   const legacyOk = legacy.items === 3 && legacy.boxes === 3
 
-  const ok = multiOk && copyOk && link.t2b && link.b2t && legacyOk
+  const ok = multiSelOk && selCopyOk && dblOk && dblBoxOk && copyOk && link.t2b && link.b2t && legacyOk
   console.log(ok ? '[PASS] 结果页多屏分组 + 兼容性正确' : '[FAIL] 结果页异常')
   if (!ok) process.exitCode = 1
   app.quit()

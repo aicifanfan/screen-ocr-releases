@@ -25,6 +25,12 @@ class OcrBridge {
     this.pending = new Map() // seq -> { resolve, reject }
     this.seq = 0
     this.onRefined = null // 两段式渐进：最终结果回调（msg => void）
+    this.onLog = null     // 诊断日志回调（line => void）：打包后 console 看不到，需要落到 startup.log
+    this.readyInfo = null // ready 里回报的初始化耗时/设备，供启动日志记录
+    this.closed = false   // 已主动关闭：不再自动重启
+    this._respawnTimer = null
+    this._respawnCount = 0
+    this._respawnWindowAt = 0
     this._readyPromise = null
     this._readyResolve = null
     this._readyReject = null
@@ -69,18 +75,31 @@ class OcrBridge {
     this.proc = proc
     this.ready = false
 
-    proc.stderr.on('data', (d) => console.error('[ocr:stderr]', String(d).trim()))
+    proc.stderr.on('data', (d) => {
+      const text = String(d).replace(/\u001b\[[0-9;]*m/g, '').trim()
+      if (!text) return
+      console.error('[ocr:stderr]', text)
+      // 打包后没有控制台：sidecar 的告警/回溯必须落到 startup.log，否则出问题无从取证
+      if (typeof this.onLog === 'function') this.onLog(text)
+    })
     proc.on('error', (e) => {
       console.error('[ocr] 启动失败：', e.message)
+      if (typeof this.onLog === 'function') this.onLog('sidecar spawn failed: ' + e.message)
       if (this.proc === proc) this.proc = null
       this.ready = false
       this._failAll('E_OCR_SPAWN: ' + e.message)
+      this._scheduleRespawn()
     })
     proc.on('exit', (code) => {
       console.error('[ocr] 子进程退出，code =', code)
-      if (this.proc === proc) this.proc = null
+      if (typeof this.onLog === 'function') this.onLog('sidecar exited code=' + code)
+      if (this.proc !== proc) return // 主动停止（reset / close / 切设备）不算崩溃，不重启
+      this.proc = null
       this.ready = false
       this._failAll('E_OCR_EXITED')
+      // 主动补一条重启：sidecar 崩掉后不要等下一次截图才冷启动，
+      // 否则用户下一次识别要连本带利等 3 s+（历史上表现为「偶发首次识别 7–8 s」）
+      this._scheduleRespawn()
     })
 
     let buf = ''
@@ -116,8 +135,19 @@ class OcrBridge {
     if (msg.type === 'ready') {
       if (msg.profile) this.profile = msg.profile // 以引擎实际加载的档位为准（可能发生回退）
       if (msg.device) this.deviceActual = msg.device // dml / cuda / cpu（可能因不可用回落）
+      this.readyInfo = msg
       this.ready = true
+      this._respawnCount = 0 // 成功就绪：重置崩溃计数，避免偶发一次崩溃后永久不再自动拉起
       if (this._readyResolve) this._readyResolve()
+      return
+    }
+
+    // 预热完成（在 ready 之后异步进行；有真请求时会提前让路，warmup_ms 为 0）
+    if (msg.type === 'warmed') {
+      if (typeof this.onLog === 'function') {
+        this.onLog('warmed: idle=' + (msg.warmup_ms == null ? 'failed' : msg.warmup_ms + 'ms') +
+          ' precise=' + (msg.precise_ms == null ? 'skipped' : msg.precise_ms + 'ms'))
+      }
       return
     }
 
@@ -217,6 +247,34 @@ class OcrBridge {
     }
   }
 
+  /**
+   * 崩溃后自动重新拉起（退避 0.5/1/1.5s）。
+   * 让「下一次截图」直接命中已经预热好的进程，而不是在识别路径上等 3s 冷启动。
+   * 60 秒内最多 3 次；连续崩溃说明环境有问题（例如缺 DirectML.dll），交给按需重启兜底。
+   */
+  _scheduleRespawn() {
+    if (this.closed || this._respawnTimer) return
+    const now = Date.now()
+    if (!this._respawnWindowAt || now - this._respawnWindowAt > 60000) {
+      this._respawnWindowAt = now
+      this._respawnCount = 0
+    }
+    if (this._respawnCount >= 3) {
+      if (typeof this.onLog === 'function') this.onLog('sidecar respawn suppressed (3 crashes within 60s)')
+      return
+    }
+    this._respawnCount++
+    const delay = 500 * this._respawnCount
+    if (typeof this.onLog === 'function') this.onLog('sidecar respawn #' + this._respawnCount + ' in ' + delay + 'ms')
+    this._respawnTimer = setTimeout(() => {
+      this._respawnTimer = null
+      if (this.closed || this.proc) return
+      this.init().catch((e) => {
+        if (typeof this.onLog === 'function') this.onLog('sidecar respawn failed: ' + (e && e.message))
+      })
+    }, delay)
+  }
+
   /** 丢弃当前进程（下次 init 会重新拉起） */
   reset() {
     const proc = this.proc
@@ -251,6 +309,8 @@ class OcrBridge {
     const proc = this.proc
     this.proc = null
     this.ready = false
+    this.closed = true // 应用退出：不再自动重启
+    if (this._respawnTimer) { clearTimeout(this._respawnTimer); this._respawnTimer = null }
     this._failAll('E_OCR_CLOSED')
     if (proc) {
       try { proc.stdin.write(JSON.stringify({ type: 'exit' }) + '\n') } catch { /* 已退出 */ }
@@ -271,6 +331,7 @@ class OcrBridge {
     this.deviceActual = null
     if (this.proc) {
       this.close()
+      this.closed = false // 切设备属于「重启」，不是退出：重启后的进程仍要能自动恢复
       await this.init()
     }
     return true

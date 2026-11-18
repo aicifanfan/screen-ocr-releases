@@ -8,6 +8,9 @@ const autoCloseEl = document.getElementById('auto-close')
 let screens = [] // [{ label, image, items: [{ text, box, score }] }]
 let hasResult = false // 是否有识别结果（用于语言切换后重绘空状态）
 
+// 多选：`si:i` → 是否被单击选中。单击切换、无需修饰键；双击则复制该行（不改变选中态）。
+const selectedKeys = new Set()
+
 // 两段式渐进：临时结果已上屏、最终结果还没来
 let refining = false
 // 流式精修进度（{ done, total }）：拿到就显示「精修中 12/64」，没有就只显示「精修中…」
@@ -72,12 +75,17 @@ function getSelectionLength() {
 }
 
 // 实时反映「是否已选中文字」：状态条显示字数，复制选中按钮的可用态同步切换
+// 多选（单击选中整行）优先展示行数：它比划选字数更贴近「我要复制这几行」的意图
 function updateSelectionStatus() {
   if (flashTimer) return // 临时提示优先
   const n = getSelectionLength()
+  const lines = selectedKeys.size
   const btn = document.getElementById('btn-copy-sel')
-  if (btn) btn.disabled = n === 0
-  if (n > 0) {
+  if (btn) btn.disabled = n === 0 && lines === 0
+  if (lines > 0) {
+    statusEl.textContent = t('result.selectedLines', { n: lines })
+    statusEl.classList.add('is-count')
+  } else if (n > 0) {
     statusEl.textContent = t('result.selectedChars', { n })
     statusEl.classList.add('is-count')
   } else {
@@ -203,6 +211,9 @@ function renderEmpty() {
   armRefiningWatchdog()
 }
 
+// 结果行的「形状签名」：判断这次刷新是「同一批行被精修替换」还是「新结果」
+const rowSig = (arr) => arr.map((s) => (s.items || []).length).join(',')
+
 // 核心：根据结果渲染（首次打开与连续截图刷新共用）
 // 兼容两种结构：{ screens:[{label,image,texts,boxes,scores}] } 或旧 { texts,boxes,scores,image }
 function render(result) {
@@ -221,6 +232,7 @@ function render(result) {
     scores: result.scores
   }]
 
+  const prevSig = rowSig(screens)
   screens = raw.filter(Boolean).map((s) => {
     // texts/boxes/scores 长度可能不一致：以 texts 为准，越界按 null 处理
     const texts = Array.isArray(s.texts) ? s.texts : []
@@ -250,6 +262,10 @@ function render(result) {
   })
 
   hasResult = true
+  // 新一次截图、或行数变了（换档位/换了结果）：多选的索引会串行，直接清空最安全。
+  // 精修替换同一批行时保留用户已选的行 —— 否则每来一批精修，选择就被清一次。
+  if (result.newResult === true || rowSig(screens) !== prevSig) selectedKeys.clear()
+  lastClick = { key: '', at: 0 }
   // 两段式渐进：临时结果（provisional）先上屏，并挂「精修中…」提示；
   // 流式精修会分批推送（refiningDone=false），提示要一直挂到最后一个 final 包。
   refining = result.provisional === true || result.refiningDone === false
@@ -278,6 +294,12 @@ function renderAll() {
       if (i < prevScroll.length && prevScroll[i]) el.scrollTop = prevScroll[i]
     })
   }
+  // DOM 是新建的：把保留下来的多选状态贴回去（精修替换 / 切语言都会重建节点）
+  selectedKeys.forEach((k) => {
+    const parts = k.split(':')
+    paintSelected(Number(parts[0]), Number(parts[1]))
+  })
+  updateSelectionStatus()
   updateRefiningChip()
   armRefiningWatchdog()
 }
@@ -373,7 +395,8 @@ function renderScreen(s, si, showTitle) {
     div.dataset.screen = si
     div.dataset.index = i
     if (it.score != null) div.title = t('result.confidence', { percent: Math.round(it.score * 100) })
-    div.addEventListener('click', () => focusBox(si, i))
+    div.addEventListener('click', (e) => handleOptionClick(e, si, i))
+    div.addEventListener('dblclick', (e) => handleOptionDblClick(e, si, i))
     editor.appendChild(div)
   })
 
@@ -389,6 +412,8 @@ function renderScreen(s, si, showTitle) {
   editor.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) e.preventDefault()
   })
+
+  // 双击整行 = 复制该行。点击/双击的区分与「不误改选中态」见 handleOptionClick 的注释。
 
   // 粘贴压平为单行，避免多行文本创建新块、破坏行与识别框的映射
   editor.addEventListener('paste', (e) => {
@@ -487,7 +512,9 @@ function drawBoxes(img, s, si) {
     d.style.height = Math.max(1, Math.round((y2 - y1) * displayScale)) + 'px'
     d.addEventListener('mouseenter', () => hoverBox(si, i))
     d.addEventListener('mouseleave', () => unhoverBox(si, i))
-    d.addEventListener('click', () => focusText(si, i))
+    // 与左侧文字行完全同构：单击切换选中，双击复制该行
+    d.addEventListener('click', (e) => handleOptionClick(e, si, i, true))
+    d.addEventListener('dblclick', (e) => handleOptionDblClick(e, si, i))
     boxLayer.appendChild(d)
   })
 }
@@ -499,6 +526,100 @@ function clearActive() {
 
 const itemEl = (si, i) => mainEl.querySelector('.item[data-screen="' + si + '"][data-index="' + i + '"]')
 const boxEl = (si, i) => mainEl.querySelector('.box[data-screen="' + si + '"][data-index="' + i + '"]')
+
+const keyOf = (si, i) => si + ':' + i
+
+// 把某一行的选中态同步到「文字行 + 对应识别框」两处（两边永远一起亮/灭）
+function paintSelected(si, i) {
+  const on = selectedKeys.has(keyOf(si, i))
+  const item = itemEl(si, i)
+  const box = boxEl(si, i)
+  if (item) item.classList.toggle('selected', on)
+  if (box) box.classList.toggle('selected', on)
+}
+
+// 单击 = 切换选中，无需修饰键，可连续点多行。
+// 同步改 class、同步更新状态条，不经过任何异步，点击到样式变化在一帧内完成。
+function toggleSelected(si, i) {
+  const k = keyOf(si, i)
+  if (selectedKeys.has(k)) selectedKeys.delete(k)
+  else selectedKeys.add(k)
+  paintSelected(si, i)
+  updateSelectionStatus()
+}
+
+function clearSelected() {
+  const keys = Array.from(selectedKeys)
+  selectedKeys.clear()
+  keys.forEach((k) => {
+    const parts = k.split(':')
+    paintSelected(Number(parts[0]), Number(parts[1]))
+  })
+  updateSelectionStatus()
+}
+
+// 多选文本：按「屏 → 行」顺序拼接，与「复制全文」的阅读顺序一致
+function getSelectedLinesText() {
+  const out = []
+  screens.forEach((s, si) => {
+    s.items.forEach((it, i) => {
+      if (selectedKeys.has(keyOf(si, i)) && it.text) out.push(it.text)
+    })
+  })
+  return out.join('\n')
+}
+
+// 单击 / 双击的公共入口。两个约束：
+//   1) 只有「按下与松开几乎没有位移」才算点击 —— 否则整段拖选文字时，扫过的行会被逐个选中；
+//   2) 同一行 350ms 内的第二下属于双击的前半段：把第一下的切换还原，
+//      于是「双击 = 复制、不改变选中态」，多选与复制互不污染。
+const DOUBLE_CLICK_MS = 350
+let lastClick = { key: '', at: 0 }
+let pointerDownAt = null
+
+function handleOptionClick(e, si, i, fromImage) {
+  const down = pointerDownAt
+  pointerDownAt = null
+  if (down && (Math.abs(e.clientX - down.x) > 4 || Math.abs(e.clientY - down.y) > 4)) return
+
+  // 双击判定只认同一个元素：先点文字行再点识别框是两次单击（两处联动），不是双击复制
+  const el = e.currentTarget
+  const kind = el && el.classList && el.classList.contains('box') ? 'box' : 'item'
+  const k = keyOf(si, i) + '@' + kind
+  const now = Date.now()
+  if (lastClick.key === k && now - lastClick.at <= DOUBLE_CLICK_MS) {
+    lastClick = { key: '', at: 0 }
+    toggleSelected(si, i) // 撤销第一下的切换
+    return
+  }
+  lastClick = { key: k, at: now }
+  toggleSelected(si, i)
+  if (fromImage) focusText(si, i)
+  else focusBox(si, i)
+}
+
+// 双击 = 直接复制该行内容（文字行与右侧识别框等价），并给出明确的复制反馈
+async function handleOptionDblClick(e, si, i) {
+  e.preventDefault() // 不要浏览器默认的「选中一个词」
+  lastClick = { key: '', at: 0 }
+  pointerDownAt = null
+  const s = screens[si]
+  const it = s && s.items[i]
+  if (!it || !it.text) return
+  await doCopy(it.text, t('result.copiedLine'))
+  const el = itemEl(si, i)
+  if (!el || !el.isConnected) return
+  el.classList.add('is-copied')
+  setTimeout(() => el.classList.remove('is-copied'), 600)
+}
+
+// 记录按下位置（用于区分「点选」与「拖选」）。不在这里清空：click 需要它，
+// 且 pointerup 早于 click 触发。
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) { pointerDownAt = null; return }
+  pointerDownAt = { x: e.clientX, y: e.clientY }
+}, true)
+document.addEventListener('pointercancel', () => { pointerDownAt = null }, true)
 
 function highlightBox(si, i, scroll) {
   const box = boxEl(si, i)
@@ -569,14 +690,15 @@ autoCloseEl.addEventListener('change', () => {
   window.api.setSettings({ autoCloseAfterCopy: autoCloseEl.checked })
 })
 
-// 拼装全文：多屏之间用屏名分隔
+// 拼装全文：只拼识别文字本身。
+// 不能带屏名（"Display 1" / "主屏" 之类）：那些是界面上的分组标题，
+// 一旦混进剪贴板，用户粘贴到别处就会多出一行无意义的来源标记。
+// 多屏之间用单换行分隔，保证「1 行 = 1 识别框」不被空行破坏。
 function getAllText() {
   return screens
-    .map((s) => {
-      const body = s.items.map((it) => it.text).join('\n')
-      return s.label ? (s.label + '\n' + body) : body
-    })
-    .join('\n\n')
+    .map((s) => s.items.map((it) => it.text).join('\n'))
+    .filter((body) => body !== '')
+    .join('\n')
 }
 
 // —— 复制 ——
@@ -619,7 +741,8 @@ document.getElementById('btn-copy-all').addEventListener('click', async () => {
 })
 
 document.getElementById('btn-copy-sel').addEventListener('click', async () => {
-  const text = getSelectionText()
+  // 优先取划选的文字；没有划选时取「单击多选」的行（两种选中方式都支持）
+  const text = getSelectionText() || getSelectedLinesText()
   if (!text) { flash(t('result.selectFirst')); return }
   await doCopy(text, t('result.copiedSel'), document.getElementById('btn-copy-sel'))
 })
@@ -715,7 +838,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault()
     const sel = getSelectionText()
     if (sel) doCopy(sel, t('result.copiedSel'))
-    else doCopy(getAllText(), t('result.copiedAll'))
+    else {
+      // 没有划选文字时，单击多选的行就是要复制的内容；最后才回落「复制全文」
+      const lines = getSelectedLinesText()
+      if (lines) doCopy(lines, t('result.copiedSel'))
+      else doCopy(getAllText(), t('result.copiedAll'))
+    }
   } else if (mod && e.key.toLowerCase() === 'a') {
     e.preventDefault()
     selectAll()

@@ -51,6 +51,17 @@ app.whenReady().then(async () => {
   console.log('[OK] 复制按钮反馈文字:', JSON.stringify(btnText), '(期望 "已复制✓")')
   console.log('[OK] 复制全文内容:', JSON.stringify(copyAll))
 
+  // 测试1b：副屏结果（label = "Display 1"）复制全文不能把屏名带进剪贴板
+  win.webContents.send('result:update', {
+    screens: [{ label: 'Display 1', labelKind: 'secondary', labelIndex: 1, image, texts: ['abc', 'def'], boxes: [[0, 0, 50, 25], [0, 25, 50, 50]], scores: [1, 1] }]
+  })
+  await sleep(200)
+  copiedText = null
+  await win.webContents.executeJavaScript(`document.getElementById('btn-copy-all').click()`)
+  await sleep(150)
+  const copyNoLabel = copiedText
+  console.log('[OK] 带屏名结果复制全文:', JSON.stringify(copyNoLabel), '(期望 "abc\\ndef")')
+
   // 测试2：连续截图刷新（onUpdate 推送新结果）
   const data2 = { texts: ['New1', 'New2'], boxes: [[0, 0, 50, 25], [0, 25, 50, 50]], scores: [1, 1], image }
   win.webContents.send('result:update', data2)
@@ -77,7 +88,8 @@ app.whenReady().then(async () => {
 
   const ok =
     btnText === '已复制✓' &&
-    copyAll && copyAll.includes('Hello') && copyAll.includes('你好') &&
+    copyAll === 'Hello\nWorld\n你好' &&
+    copyNoLabel === 'abc\ndef' &&
     itemCount === 2 && firstNew === 'New1' &&
     sel && sel.includes('New1') && sel.includes('New2') &&
     closeRequested

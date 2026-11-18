@@ -264,22 +264,40 @@ def build_params(profile, device="cpu"):
     return params
 
 
-def warmup(engine):
+def _warm_image(w=960, h=600):
+    """合成一张「像截图」的图：浅底 + 若干深色横条（模拟文字行）。
+
+    为什么不用原来那张 64×320 的小白图：ONNX Runtime 的图优化 / DirectML 算子编译
+    是**按输入形状**做的，小图编译出的图对真实截图（缩放到 960 宽）没有帮助。
+    用接近真实输入尺寸的合成图预热，第一次真实识别就不用再等一次编译。
+    """
+    img = np.full((h, w, 3), 245, dtype=np.uint8)
+    for y in range(40, h - 40, 48):
+        img[y:y + 16, 40:w - 40] = 60
+    return img
+
+
+def warmup(engine, should_stop=None):
     """预热：跑一次检测 + 一次识别，把 ORT 的图优化与内存分配挪到启动阶段。
 
-    只做一次很小的推理（白底图，识别结果为空是正常的），目的是让「第一次截图」不再额外多等。
-    失败不影响主流程：预热只是优化，不是功能依赖。
+    should_stop：可选回调，返回 True 表示「已经有真实请求在排队」。
+    预热只是优化，不是功能依赖 —— 一旦有真请求，立刻放弃剩余预热，让真请求自己完成预热
+    （空转预热排在用户请求前面，只会让首屏更慢）。
+
+    失败不影响主流程。
     """
     t0 = time.perf_counter()
     try:
-        # rapidocr 的模型是懒加载，构造 RapidOCR() 并不会建立 ORT session；
-        # 这里显式触发一次 det/rec 的前向，把 session 初始化与内存分配挪到启动阶段。
         from rapidocr.ch_ppocr_rec.typings import TextRecInput
-        blank = np.full((64, 320, 3), 255, dtype=np.uint8)
         det = engine._load_det_model()
         rec = engine._load_rec_model()
-        det(blank)
-        rec(TextRecInput(img=blank[8:56, 16:304]))
+        if should_stop and should_stop():
+            return 0.0
+        det(_warm_image())
+        if should_stop and should_stop():
+            return round((time.perf_counter() - t0) * 1000, 1)
+        blank = np.full((48, 320, 3), 255, dtype=np.uint8)
+        rec(TextRecInput(img=blank))
     except Exception:  # noqa: BLE001
         return None
     return round((time.perf_counter() - t0) * 1000, 1)
@@ -543,6 +561,26 @@ def main():
                 return _make("balanced", "cpu"), "balanced", "cpu"
             raise
 
+    # stdin 用独立线程读进队列，主线程只从队列取。
+    # 原因：精修（medium 全量重算）可能要几十秒，若主线程直接阻塞在 sys.stdin 的 for 循环里，
+    # 这期间到来的「切换档位 / 下一次截图」全部排队 —— 实测一次 97 行精修会把后续请求卡住 102 秒，
+    # 直接撞上主进程 90 秒的请求超时（用户看到「识别超时」，且误以为是档位问题）。
+    # 有队列之后，精修每批之间可以检查「有没有新请求在等」，有就立即收尾让路。
+    #
+    # 这个线程必须在建引擎之前就起来：预热期间到达的请求要先落到队列里，
+    # 这样预热才能在第 2 步之前发现「用户已经截图了」并立刻让路。
+    inbox = queue.Queue()
+
+    def _reader():
+        try:
+            for raw in sys.stdin:
+                inbox.put(raw)
+        except Exception:  # noqa: BLE001
+            pass
+        inbox.put(None)  # EOF
+
+    threading.Thread(target=_reader, name="stdin-reader", daemon=True).start()
+
     t0 = time.perf_counter()
     engine, profile, device = new_engine(profile)
 
@@ -560,14 +598,12 @@ def main():
         return precise["engine"]
 
     init_ms = (time.perf_counter() - t0) * 1000
-    warm_ms = warmup(engine)
-    if _progressive_on(profile):
-        try:
-            get_precise()  # 预热 medium rec，避免第一次截图多等 1s
-        except Exception:  # noqa: BLE001
-            pass
+    # 先发 ready，再做预热：主进程等的只是「引擎可用」，不该被空转预热拖住。
+    # 预热和「medium 精修引擎初始化」都挪到 ready 之后，并且一旦发现请求已在排队就跳过，
+    # 让真请求自己承担第一次编译（它本来就是最合适的那次预热）。
     _emit({"type": "ready", "profile": profile, "init_ms": round(init_ms, 1),
-           "warmup_ms": warm_ms, "threads": _threads(), "threads_det": _threads_det(),
+           "warmup_ms": None, "warming": True,
+           "threads": _threads(), "threads_det": _threads_det(),
            "threads_rec": _threads_rec_small() if _rec_kind(profile) != "medium" else _threads_rec_medium(),
            "cascade": _cascade_on(profile), "progressive": _progressive_on(profile),
            # 设备信息：device 是实际生效的，requested 是用户/配置要的，reason 供日志排查
@@ -575,22 +611,22 @@ def main():
            "device_fallback": device != device_requested and device_requested != "auto",
            "device_reason": device_reason})
 
-    # stdin 用独立线程读进队列，主线程只从队列取。
-    # 原因：精修（medium 全量重算）可能要几十秒，若主线程直接阻塞在 sys.stdin 的 for 循环里，
-    # 这期间到来的「切换档位 / 下一次截图」全部排队 —— 实测一次 97 行精修会把后续请求卡住 102 秒，
-    # 直接撞上主进程 90 秒的请求超时（用户看到「识别超时」，且误以为是档位问题）。
-    # 有队列之后，精修每批之间可以检查「有没有新请求在等」，有就立即收尾让路。
-    inbox = queue.Queue()
-
-    def _reader():
+    # 先观望一小会儿再预热：主进程拿到 ready 会立刻检查有没有待识别请求，
+    # 真请求通常在这个窗口内到达（用户刚框完就截）——那就干脆别预热了，让真请求自己预热。
+    # 150ms 对启动时间没有感知，却能省掉一整轮空转检测。
+    if inbox.empty():
+        time.sleep(0.15)
+    warm_ms = warmup(engine, should_stop=lambda: not inbox.empty())
+    precise_ms = None
+    if _progressive_on(profile) and inbox.empty():
+        t_p = time.perf_counter()
         try:
-            for raw in sys.stdin:
-                inbox.put(raw)
+            get_precise()  # 预热 medium rec，避免第一次精修多等 1s
+            precise_ms = round((time.perf_counter() - t_p) * 1000, 1)
         except Exception:  # noqa: BLE001
-            pass
-        inbox.put(None)  # EOF
-
-    threading.Thread(target=_reader, name="stdin-reader", daemon=True).start()
+            precise_ms = None
+    _emit({"type": "warmed", "warmup_ms": warm_ms, "precise_ms": precise_ms,
+           "init_ms": round(init_ms, 1), "idle_warmup": warm_ms not in (None, 0.0)})
 
     for line in iter(inbox.get, None):
         line = line.strip()
@@ -611,7 +647,7 @@ def main():
                 t0 = time.perf_counter()
                 engine, profile, device = new_engine(p)  # 切档保留当前设备，失败按原逻辑回落
                 precise["engine"] = None  # 档位变了，精修识别器要重建
-                warmup(engine)  # 切档后立刻预热，避免「切换后第一次识别」特别慢
+                warmup(engine, should_stop=lambda: not inbox.empty())  # 切档后预热；有请求在等就让路
                 _emit({"type": "profileChanged", "seq": seq, "profile": profile, "device": device,
                        "init_ms": round((time.perf_counter() - t0) * 1000, 1)})
             else:

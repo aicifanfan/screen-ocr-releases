@@ -207,6 +207,23 @@ const ocr = new OcrBridge(ocrProfile)
 try { ocr.device = normalizeDevice(getAll().gpuAccel) } catch { /* 用默认 auto */ }
 bindRefinedHandler() // 必须在 ocr 初始化之后绑定（见函数上的注释）
 
+// sidecar 的 stderr 只在开发期能看到（打包后没有控制台），落盘才有事后取证能力
+ocr.onLog = (line) => log.info('[sidecar] ' + String(line).slice(0, 400))
+
+// 尽早拉起 OCR 子进程：Python 侧车的冷启动（进程启动 + 模型会话 + 预热）约 2–4 s，
+// 必须与 Electron 自己建托盘/读配置/建窗口并行，而不是等 whenReady 之后才开始。
+// 没拿到单实例锁的进程会立刻退出，不在这里启动，避免白起一个子进程。
+if (gotLock) {
+  ocr.init()
+    .then(() => {
+      const info = ocr.readyInfo || {}
+      log.info('OCR 就绪：实际档位 ' + ocr.profile + ' | 推理设备 ' + (ocr.deviceActual || 'cpu') +
+        ' | 会话初始化 ' + (info.init_ms != null ? info.init_ms + 'ms' : '?') +
+        (ocr.device !== 'auto' ? '（配置：' + ocr.device + '）' : ''))
+    })
+    .catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
+}
+
 const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js')
 
 // —— 拖拽框选状态（主进程统一协调，支持跨屏无缝框选）——
@@ -753,11 +770,8 @@ app.whenReady().then(() => {
   const cfg = getAll()
   app.setLoginItemSettings({ openAtLogin: !!cfg.autoLaunch })
 
-  // 预热 OCR 模型，避免首次截图卡顿
-  ocr.init()
-    .then(() => log.info('OCR 就绪：实际档位 ' + ocr.profile + ' | 推理设备 ' + (ocr.deviceActual || 'cpu') +
-      (ocr.device !== 'auto' ? '（配置：' + ocr.device + '）' : '')))
-    .catch((e) => log.error('OCR 初始化失败: ' + (e && e.message)))
+  // OCR 子进程已在模块加载期启动（见 ocr 初始化处），这里不再重复调用：
+  // init() 虽然幂等，但重复 .then 会打出两条「OCR 就绪」，反而干扰日志判断。
 
   // 预热系统缩放读取：把 ~1s 的外部进程调用挪到启动阶段（异步，不阻塞窗口）
   readSystemScale()
